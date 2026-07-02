@@ -1,52 +1,189 @@
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useMemo } from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  Linking,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, spacing, typography } from '@/theme';
-import { Icon } from '@/components/Icon';
+import { Icon, type IconName } from '@/components/Icon';
+import { type LocalTrack, useAudioLibrary } from '@/library/useAudioLibrary';
 
-const FILTERS = ['Playlists', 'Artistes', 'Albums', 'Titres'] as const;
+/** Formate une durée (ms) en `m:ss`. */
+function formatDuration(ms: number | null): string {
+  if (ms == null || ms <= 0) {
+    return '--:--';
+  }
+  const totalSeconds = Math.round(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
 
-/** Onglet Bibliothèque (placeholder — le contenu réel arrive avec le scan local). */
+/** Onglet Bibliothèque : scanne et liste les fichiers audio locaux. */
 export default function LibraryScreen() {
   const insets = useSafeAreaInsets();
+  const { status, tracks, error, requestPermission, rescan } = useAudioLibrary();
+
+  const subtitle = useMemo(() => {
+    if (status === 'ready' && tracks.length > 0) {
+      return `${tracks.length} ${tracks.length > 1 ? 'titres' : 'titre'} sur l'appareil`;
+    }
+    return 'Musique locale';
+  }, [status, tracks.length]);
 
   return (
-    <View style={styles.screen}>
-      <ScrollView
-        contentContainerStyle={{ paddingTop: insets.top + spacing.md }}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* En-tête */}
-        <View style={styles.header}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.title}>Bibliothèque</Text>
-            <Text style={styles.subtitle}>2 134 titres · synchronisé</Text>
-          </View>
-          <Icon name="search" size={26} color={colors.textPrimary} />
+    <View style={[styles.screen, { paddingTop: insets.top + spacing.md }]}>
+      {/* En-tête */}
+      <View style={styles.header}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.title}>Bibliothèque</Text>
+          <Text style={styles.subtitle}>{subtitle}</Text>
         </View>
+        {status === 'ready' && (
+          <Pressable
+            onPress={rescan}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Relancer le scan"
+          >
+            <Icon name="refresh" size={26} color={colors.textPrimary} />
+          </Pressable>
+        )}
+      </View>
 
-        {/* Filtres (segmented, style Forge) */}
-        <View style={styles.filters}>
-          {FILTERS.map((filter, i) => {
-            const active = i === 0;
-            return (
-              <View key={filter} style={[styles.filter, active && styles.filterActive]}>
-                <Text style={[styles.filterLabel, active && styles.filterLabelActive]}>
-                  {filter}
-                </Text>
-              </View>
-            );
-          })}
-        </View>
+      <LibraryBody
+        status={status}
+        tracks={tracks}
+        error={error}
+        onRequestPermission={requestPermission}
+        onRescan={rescan}
+      />
+    </View>
+  );
+}
 
-        {/* Placeholder de contenu */}
-        <View style={styles.empty}>
-          <Icon name="library_music" size={40} color={colors.textMuted} />
-          <Text style={styles.emptyText}>
-            La bibliothèque locale s&apos;affichera ici.
+type BodyProps = {
+  status: ReturnType<typeof useAudioLibrary>['status'];
+  tracks: LocalTrack[];
+  error: string | null;
+  onRequestPermission: () => void;
+  onRescan: () => void;
+};
+
+function LibraryBody({ status, tracks, error, onRequestPermission, onRescan }: BodyProps) {
+  switch (status) {
+    case 'loading':
+    case 'scanning':
+      return (
+        <View style={styles.centered}>
+          <ActivityIndicator color={colors.accent} />
+          <Text style={styles.stateText}>
+            {status === 'scanning' ? 'Analyse de la bibliothèque…' : 'Chargement…'}
           </Text>
         </View>
-      </ScrollView>
+      );
+
+    case 'unsupported':
+      return (
+        <StateMessage
+          icon="library_music"
+          text="La bibliothèque locale est disponible depuis l'application Android."
+        />
+      );
+
+    case 'undetermined':
+      return (
+        <StateMessage
+          icon="library_music"
+          text="Fuoco a besoin d'accéder à vos fichiers audio pour construire votre bibliothèque."
+          actionLabel="Autoriser l'accès"
+          onAction={onRequestPermission}
+        />
+      );
+
+    case 'denied':
+      return (
+        <StateMessage
+          icon="lock"
+          text="L'accès aux fichiers audio est refusé. Activez-le dans les réglages pour scanner votre musique."
+          actionLabel="Ouvrir les réglages"
+          onAction={() => void Linking.openSettings()}
+        />
+      );
+
+    case 'ready':
+      if (error) {
+        return (
+          <StateMessage icon="refresh" text={error} actionLabel="Réessayer" onAction={onRescan} />
+        );
+      }
+      if (tracks.length === 0) {
+        return (
+          <StateMessage
+            icon="library_music"
+            text="Aucun fichier audio trouvé sur l'appareil."
+            actionLabel="Relancer le scan"
+            onAction={onRescan}
+          />
+        );
+      }
+      return (
+        <FlatList
+          data={tracks}
+          keyExtractor={(track) => track.id}
+          renderItem={({ item }) => <TrackRow track={item} />}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+        />
+      );
+  }
+}
+
+function TrackRow({ track }: { track: LocalTrack }) {
+  return (
+    <View style={styles.row}>
+      <Icon name="music_note" size={22} color={colors.textMuted} style={styles.rowIcon} />
+      <View style={styles.rowText}>
+        <Text style={styles.rowTitle} numberOfLines={1}>
+          {track.title}
+        </Text>
+        <Text style={styles.rowMeta} numberOfLines={1}>
+          {track.filename}
+        </Text>
+      </View>
+      <Text style={styles.rowDuration}>{formatDuration(track.durationMs)}</Text>
+    </View>
+  );
+}
+
+type StateMessageProps = {
+  icon: IconName;
+  text: string;
+  actionLabel?: string;
+  onAction?: () => void;
+};
+
+function StateMessage({ icon, text, actionLabel, onAction }: StateMessageProps) {
+  return (
+    <View style={styles.centered}>
+      <Icon name={icon} size={40} color={colors.textMuted} />
+      <Text style={styles.stateText}>{text}</Text>
+      {actionLabel && onAction && (
+        <Pressable
+          onPress={onAction}
+          style={styles.button}
+          accessibilityRole="button"
+          accessibilityLabel={actionLabel}
+        >
+          <Text style={styles.buttonLabel}>{actionLabel}</Text>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -60,7 +197,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     paddingHorizontal: spacing.xxl,
-    paddingBottom: spacing.sm,
+    paddingBottom: spacing.md,
   },
   title: {
     ...typography.display,
@@ -69,39 +206,59 @@ const styles = StyleSheet.create({
     ...typography.label,
     marginTop: spacing.sm,
   },
-  filters: {
-    flexDirection: 'row',
-    gap: spacing.xxl,
-    paddingHorizontal: spacing.xxl,
-    paddingTop: spacing.lg,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  filter: {
-    paddingBottom: 11,
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
-    marginBottom: -1,
-  },
-  filterActive: {
-    borderBottomColor: colors.accent,
-  },
-  filterLabel: {
-    fontFamily: typography.heading.fontFamily,
-    fontSize: 14,
-    color: colors.textMuted,
-  },
-  filterLabelActive: {
-    color: colors.textPrimary,
-  },
-  empty: {
+  centered: {
+    flex: 1,
     alignItems: 'center',
-    gap: spacing.md,
-    paddingTop: 72,
+    justifyContent: 'center',
+    gap: spacing.lg,
     paddingHorizontal: spacing.xxl,
+    paddingBottom: 72,
   },
-  emptyText: {
+  stateText: {
     ...typography.body,
     textAlign: 'center',
+  },
+  button: {
+    marginTop: spacing.xs,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.md,
+    backgroundColor: colors.accent,
+    borderRadius: 4,
+  },
+  buttonLabel: {
+    fontFamily: typography.heading.fontFamily,
+    fontSize: 14,
+    color: colors.onAccent,
+  },
+  listContent: {
+    paddingBottom: spacing.xxl,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingHorizontal: spacing.xxl,
+    paddingVertical: spacing.md,
+  },
+  rowIcon: {
+    width: 24,
+    textAlign: 'center',
+  },
+  rowText: {
+    flex: 1,
+  },
+  rowTitle: {
+    ...typography.heading,
+  },
+  rowMeta: {
+    ...typography.body,
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  rowDuration: {
+    ...typography.body,
+    color: colors.textMuted,
+    fontVariant: ['tabular-nums'],
   },
 });

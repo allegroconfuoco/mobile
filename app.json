@@ -27,6 +27,13 @@
     "plugins": [
       "expo-router",
       [
+        "expo-media-library",
+        {
+          "granularPermissions": ["audio"],
+          "isAccessMediaLocationEnabled": false
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "backgroundColor": "#208AEF",

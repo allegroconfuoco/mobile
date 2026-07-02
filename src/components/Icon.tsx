@@ -31,7 +31,10 @@ export type IconName =
   | 'arrow_back'
   | 'queue_music'
   | 'lyrics'
-  | 'cast';
+  | 'cast'
+  | 'music_note'
+  | 'lock'
+  | 'refresh';
 
 type IconProps = {
   name: IconName;

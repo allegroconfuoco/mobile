@@ -11,7 +11,9 @@ export default function NowPlayingScreen() {
   const insets = useSafeAreaInsets();
 
   return (
-    <View style={[styles.screen, { paddingTop: insets.top + spacing.sm, paddingBottom: insets.bottom }]}>
+    <View
+      style={[styles.screen, { paddingTop: insets.top + spacing.sm, paddingBottom: insets.bottom }]}
+    >
       {/* Barre supérieure : fermer + menu */}
       <View style={styles.topBar}>
         <Pressable
