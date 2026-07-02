@@ -9,10 +9,12 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Image } from 'expo-image';
 
-import { colors, spacing, typography } from '@/theme';
+import { colors, coverFallback, radii, spacing, typography } from '@/theme';
 import { Icon, type IconName } from '@/components/Icon';
 import { type LocalTrack, useAudioLibrary } from '@/library/useAudioLibrary';
+import { useTrackTags } from '@/library/useTrackTags';
 
 /** Formate une durée (ms) en `m:ss`. */
 function formatDuration(ms: number | null): string {
@@ -146,18 +148,44 @@ function LibraryBody({ status, tracks, error, onRequestPermission, onRescan }: B
 }
 
 function TrackRow({ track }: { track: LocalTrack }) {
+  // Tags ID3 lus paresseusement ; on retombe sur le nom de fichier tant qu'ils manquent.
+  const { tags } = useTrackTags(track.id);
+
+  const title = tags?.title ?? track.title;
+  const meta = [tags?.artist, tags?.album].filter(Boolean).join(' · ') || 'Artiste inconnu';
+
   return (
     <View style={styles.row}>
-      <Icon name="music_note" size={22} color={colors.textMuted} style={styles.rowIcon} />
+      <TrackCover uri={tags?.artworkUri ?? null} />
       <View style={styles.rowText}>
         <Text style={styles.rowTitle} numberOfLines={1}>
-          {track.title}
+          {title}
         </Text>
         <Text style={styles.rowMeta} numberOfLines={1}>
-          {track.filename}
+          {meta}
         </Text>
       </View>
       <Text style={styles.rowDuration}>{formatDuration(track.durationMs)}</Text>
+    </View>
+  );
+}
+
+/** Pochette de piste : image extraite du tag, ou pastille de repli. */
+function TrackCover({ uri }: { uri: string | null }) {
+  if (uri) {
+    return (
+      <Image
+        source={{ uri }}
+        style={styles.cover}
+        contentFit="cover"
+        transition={120}
+        accessible={false}
+      />
+    );
+  }
+  return (
+    <View style={[styles.cover, styles.coverFallback]}>
+      <Icon name="music_note" size={20} color={colors.onAccent} />
     </View>
   );
 }
@@ -240,9 +268,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xxl,
     paddingVertical: spacing.md,
   },
-  rowIcon: {
-    width: 24,
-    textAlign: 'center',
+  cover: {
+    width: 44,
+    height: 44,
+    borderRadius: radii.sm,
+    backgroundColor: colors.surface,
+  },
+  coverFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: coverFallback,
   },
   rowText: {
     flex: 1,
