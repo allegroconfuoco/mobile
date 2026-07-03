@@ -29,7 +29,9 @@
       [
         "expo-media-library",
         {
-          "granularPermissions": ["audio"],
+          "granularPermissions": [
+            "audio"
+          ],
           "isAccessMediaLocationEnabled": false
         }
       ],
@@ -42,7 +44,8 @@
             "imageWidth": 76
           }
         }
-      ]
+      ],
+      "expo-sqlite"
     ],
     "experiments": {
       "typedRoutes": true,

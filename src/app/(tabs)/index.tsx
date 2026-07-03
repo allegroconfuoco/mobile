@@ -33,14 +33,17 @@ function formatDuration(ms: number | null): string {
 /** Onglet Bibliothèque : scanne et liste les fichiers audio locaux. */
 export default function LibraryScreen() {
   const insets = useSafeAreaInsets();
-  const { status, tracks, error, requestPermission, rescan } = useAudioLibrary();
+  const { status, tracks, refreshing, error, requestPermission, rescan } = useAudioLibrary();
 
   const subtitle = useMemo(() => {
+    if (refreshing) {
+      return 'Mise à jour…';
+    }
     if (status === 'ready' && tracks.length > 0) {
       return `${tracks.length} ${tracks.length > 1 ? 'titres' : 'titre'} sur l'appareil`;
     }
     return 'Musique locale';
-  }, [status, tracks.length]);
+  }, [status, tracks.length, refreshing]);
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + spacing.md }]}>
