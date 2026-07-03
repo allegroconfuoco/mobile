@@ -33,6 +33,7 @@ export type IconName =
   | 'lyrics'
   | 'cast'
   | 'music_note'
+  | 'graphic_eq'
   | 'lock'
   | 'refresh';
 

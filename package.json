@@ -1,6 +1,6 @@
 {
   "name": "fuoco",
-  "main": "expo-router/entry",
+  "main": "index.js",
   "version": "1.0.0",
   "dependencies": {
     "@expo-google-fonts/schibsted-grotesk": "^0.4.2",
@@ -27,6 +27,7 @@
     "react-native-reanimated": "4.3.1",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "4.25.2",
+    "react-native-track-player": "^5.0.0-alpha0",
     "react-native-web": "~0.21.0",
     "react-native-worklets": "0.8.3"
   },

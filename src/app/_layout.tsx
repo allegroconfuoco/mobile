@@ -14,6 +14,7 @@ import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { colors } from '@/theme';
+import { PlayerProvider } from '@/player/PlayerProvider';
 
 // Garde le splash affiché tant que les polices ne sont pas prêtes.
 SplashScreen.preventAutoHideAsync();
@@ -42,16 +43,18 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <StatusBar style="light" />
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: colors.background },
-        }}
-      >
-        <Stack.Screen name="(tabs)" />
-        {/* Écran Lecture présenté en modal, au-dessus de la tab bar. */}
-        <Stack.Screen name="now-playing" options={{ presentation: 'modal' }} />
-      </Stack>
+      <PlayerProvider>
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: colors.background },
+          }}
+        >
+          <Stack.Screen name="(tabs)" />
+          {/* Écran Lecture présenté en modal, au-dessus de la tab bar. */}
+          <Stack.Screen name="now-playing" options={{ presentation: 'modal' }} />
+        </Stack>
+      </PlayerProvider>
     </SafeAreaProvider>
   );
 }

@@ -15,6 +15,8 @@ import { colors, coverFallback, radii, spacing, typography } from '@/theme';
 import { Icon, type IconName } from '@/components/Icon';
 import { type LocalTrack, useAudioLibrary } from '@/library/useAudioLibrary';
 import { useTrackTags } from '@/library/useTrackTags';
+import { usePlayer } from '@/player/PlayerProvider';
+import { usePlayback } from '@/player/usePlayback';
 
 /** Formate une durée (ms) en `m:ss`. */
 function formatDuration(ms: number | null): string {
@@ -79,6 +81,9 @@ type BodyProps = {
 };
 
 function LibraryBody({ status, tracks, error, onRequestPermission, onRescan }: BodyProps) {
+  const { playQueue } = usePlayer();
+  const { track: activeTrack } = usePlayback();
+
   switch (status) {
     case 'loading':
     case 'scanning':
@@ -139,7 +144,13 @@ function LibraryBody({ status, tracks, error, onRequestPermission, onRescan }: B
         <FlatList
           data={tracks}
           keyExtractor={(track) => track.id}
-          renderItem={({ item }) => <TrackRow track={item} />}
+          renderItem={({ item, index }) => (
+            <TrackRow
+              track={item}
+              isActive={item.id === activeTrack?.id}
+              onPress={() => void playQueue(tracks, index)}
+            />
+          )}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
         />
@@ -147,7 +158,13 @@ function LibraryBody({ status, tracks, error, onRequestPermission, onRescan }: B
   }
 }
 
-function TrackRow({ track }: { track: LocalTrack }) {
+type TrackRowProps = {
+  track: LocalTrack;
+  isActive: boolean;
+  onPress: () => void;
+};
+
+function TrackRow({ track, isActive, onPress }: TrackRowProps) {
   // Tags ID3 lus paresseusement ; on retombe sur le nom de fichier tant qu'ils manquent.
   const { tags } = useTrackTags(track.id);
 
@@ -155,18 +172,28 @@ function TrackRow({ track }: { track: LocalTrack }) {
   const meta = [tags?.artist, tags?.album].filter(Boolean).join(' · ') || 'Artiste inconnu';
 
   return (
-    <View style={styles.row}>
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+      accessibilityRole="button"
+      accessibilityState={isActive ? { selected: true } : {}}
+      accessibilityLabel={`Lire ${title}`}
+    >
       <TrackCover uri={tags?.artworkUri ?? null} />
       <View style={styles.rowText}>
-        <Text style={styles.rowTitle} numberOfLines={1}>
+        <Text style={[styles.rowTitle, isActive && styles.rowTitleActive]} numberOfLines={1}>
           {title}
         </Text>
         <Text style={styles.rowMeta} numberOfLines={1}>
           {meta}
         </Text>
       </View>
-      <Text style={styles.rowDuration}>{formatDuration(track.durationMs)}</Text>
-    </View>
+      {isActive ? (
+        <Icon name="graphic_eq" size={20} color={colors.accentIcon} />
+      ) : (
+        <Text style={styles.rowDuration}>{formatDuration(track.durationMs)}</Text>
+      )}
+    </Pressable>
   );
 }
 
@@ -268,6 +295,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xxl,
     paddingVertical: spacing.md,
   },
+  rowPressed: {
+    backgroundColor: colors.surface,
+  },
   cover: {
     width: 44,
     height: 44,
@@ -284,6 +314,9 @@ const styles = StyleSheet.create({
   },
   rowTitle: {
     ...typography.heading,
+  },
+  rowTitleActive: {
+    color: colors.accentIcon,
   },
   rowMeta: {
     ...typography.body,
