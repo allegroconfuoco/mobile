@@ -122,27 +122,61 @@ export function tracksForArtist(tracks: LocalTrack[], name: string): LocalTrack[
   return tracks.filter((t) => artistOf(t) === name);
 }
 
-/** Compare deux pistes par n° de piste (celles sans numéro en fin) puis titre. */
-function byTrackNo(a: LocalTrack, b: LocalTrack): number {
-  const na = a.trackNo ?? Number.MAX_SAFE_INTEGER;
-  const nb = b.trackNo ?? Number.MAX_SAFE_INTEGER;
-  return na - nb || compare(a.title, b.title);
+/** Position d'ordre, valeur manquante repoussée en fin. */
+function pos(n: number | null): number {
+  return n ?? Number.MAX_SAFE_INTEGER;
+}
+
+/**
+ * Ordonne deux pistes d'un même album : n° de disque (TPOS), puis n° de piste, puis titre.
+ * Les albums mono-disque n'ont pas de `discNo` (tous à `MAX`) : ils sont donc départagés
+ * directement par le n° de piste, comportement inchangé.
+ */
+function byDiscThenTrack(a: LocalTrack, b: LocalTrack): number {
+  return (
+    pos(a.discNo) - pos(b.discNo) || pos(a.trackNo) - pos(b.trackNo) || compare(a.title, b.title)
+  );
 }
 
 /**
  * Pistes d'un album donné (clé renvoyée par `buildAlbums` / `makeAlbumKey`), ordonnées par
- * n° de piste puis titre. Les pistes sans numéro passent en fin de liste.
+ * disque puis n° de piste puis titre. Les pistes sans numéro passent en fin de liste.
  */
 export function tracksForAlbum(tracks: LocalTrack[], key: string): LocalTrack[] {
-  return tracks.filter((t) => albumKeyOf(t) === key).sort(byTrackNo);
+  return tracks.filter((t) => albumKeyOf(t) === key).sort(byDiscThenTrack);
+}
+
+/** Un disque d'un album, pour l'affichage sectionné du détail. */
+export type AlbumDisc = {
+  /** Numéro de disque, ou `null` si le tag est absent. */
+  disc: number | null;
+  data: LocalTrack[];
+};
+
+/**
+ * Découpe des pistes d'album (déjà triées par `tracksForAlbum`) en disques consécutifs.
+ * Renvoie une seule section pour un album mono-disque : l'UI n'affiche l'en-tête que s'il y en
+ * a plusieurs.
+ */
+export function groupAlbumByDisc(albumTracks: LocalTrack[]): AlbumDisc[] {
+  const discs: AlbumDisc[] = [];
+  for (const t of albumTracks) {
+    const last = discs[discs.length - 1];
+    if (last && last.disc === (t.discNo ?? null)) {
+      last.data.push(t);
+    } else {
+      discs.push({ disc: t.discNo ?? null, data: [t] });
+    }
+  }
+  return discs;
 }
 
 /**
- * Ordonne les pistes d'un artiste par album (ordre de `buildAlbums`) puis n° de piste : sert de
- * file de lecture cohérente et de découpage en sections pour l'écran détail artiste.
+ * Ordonne les pistes d'un artiste par album (ordre de `buildAlbums`) puis disque/n° de piste :
+ * sert de file de lecture cohérente et de découpage en sections pour l'écran détail artiste.
  */
 export function orderArtistTracks(tracks: LocalTrack[]): LocalTrack[] {
-  return [...tracks].sort((a, b) => compare(albumOf(a), albumOf(b)) || byTrackNo(a, b));
+  return [...tracks].sort((a, b) => compare(albumOf(a), albumOf(b)) || byDiscThenTrack(a, b));
 }
 
 /** Critère de tri de la liste des morceaux. */

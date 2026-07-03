@@ -23,8 +23,10 @@ export type TrackTags = {
   album: string | null;
   /** Artiste de l'album (TPE2), pour regrouper les compilations, ou `null`. */
   albumArtist: string | null;
-  /** Numéro de piste (TRCK), pour ordonner un album, ou `null`. */
+  /** Numéro de piste (TRCK), pour ordonner au sein d'un disque, ou `null`. */
   trackNo: number | null;
+  /** Numéro de disque (TPOS), pour ordonner un album multi-disques, ou `null`. */
+  discNo: number | null;
   /** URI `file://` d'une pochette extraite et mise en cache, ou `null`. */
   artworkUri: string | null;
 };
@@ -35,6 +37,7 @@ const EMPTY_TAGS: TrackTags = {
   album: null,
   albumArtist: null,
   trackNo: null,
+  discNo: null,
   artworkUri: null,
 };
 
@@ -150,6 +153,7 @@ export function extractTrackTags(assetId: string, uri: string): TrackTags {
     album: parsed?.album ?? null,
     albumArtist: parsed?.albumArtist ?? null,
     trackNo: parsed?.trackNo ?? null,
+    discNo: parsed?.discNo ?? null,
     artworkUri,
   };
   tagsCache.set(assetId, tags);

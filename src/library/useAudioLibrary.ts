@@ -47,6 +47,8 @@ export type LocalTrack = {
   albumArtist: string | null;
   /** Numéro de piste (tag ID3), ou `null`. */
   trackNo: number | null;
+  /** Numéro de disque (tag ID3 TPOS), ou `null`. */
+  discNo: number | null;
   /** URI `file://` d'une pochette extraite en cache au scan, ou `null`. */
   artworkUri: string | null;
 };
@@ -84,6 +86,7 @@ const NO_TAGS: TrackTags = {
   album: null,
   albumArtist: null,
   trackNo: null,
+  discNo: null,
   artworkUri: null,
 };
 
@@ -114,6 +117,7 @@ function toRow(
     album: tags.album,
     albumArtist: tags.albumArtist,
     trackNo: tags.trackNo,
+    discNo: tags.discNo,
     artworkUri: tags.artworkUri,
   };
 }
@@ -129,6 +133,7 @@ function rowToTrack(r: db.TrackRow): LocalTrack {
     album: r.album,
     albumArtist: r.albumArtist,
     trackNo: r.trackNo,
+    discNo: r.discNo,
     artworkUri: r.artworkUri,
   };
 }

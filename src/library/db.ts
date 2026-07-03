@@ -32,8 +32,10 @@ export type TrackRow = {
   album: string | null;
   /** Artiste de l'album (tag ID3 TPE2) : regroupe les compilations. */
   albumArtist: string | null;
-  /** Numéro de piste (tag ID3), pour ordonner un album. */
+  /** Numéro de piste (tag ID3), pour ordonner au sein d'un disque. */
   trackNo: number | null;
+  /** Numéro de disque (tag ID3 TPOS), pour ordonner un album multi-disques. */
+  discNo: number | null;
   /** URI `file://` d'une pochette extraite en cache au scan, ou `null`. */
   artworkUri: string | null;
 };
@@ -43,7 +45,7 @@ export type FolderPref = { folder: string; included: boolean };
 
 const isSupported = Platform.OS !== 'web';
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 let dbInstance: SQLite.SQLiteDatabase | null = null;
 
@@ -109,6 +111,16 @@ function migrate(database: SQLite.SQLiteDatabase): void {
     `);
   }
 
+  // v3 : numéro de disque (TPOS) pour l'ordre des albums multi-disques. Même logique qu'en v2,
+  // on vide `tracks` pour forcer la relecture du tag (le diff incrémental ne rattraperait pas
+  // les lignes déjà connues) ; préférences de dossiers et exclusions conservées.
+  if (current < 3) {
+    database.execSync(`
+      ALTER TABLE tracks ADD COLUMN disc_no INTEGER;
+      DELETE FROM tracks;
+    `);
+  }
+
   database.execSync(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -126,6 +138,7 @@ export function loadTracks(): TrackRow[] {
             artist, album,
             album_artist AS albumArtist,
             track_no AS trackNo,
+            disc_no AS discNo,
             artwork_uri AS artworkUri
        FROM tracks
        ORDER BY modification_time DESC`
@@ -163,9 +176,9 @@ export function upsertTracks(rows: TrackRow[]): void {
   const stmt = database.prepareSync(
     `INSERT OR REPLACE INTO tracks
        (id, filename, title, folder, uri, duration_ms, modification_time, creation_time,
-        artist, album, album_artist, track_no, artwork_uri)
+        artist, album, album_artist, track_no, disc_no, artwork_uri)
      VALUES ($id, $filename, $title, $folder, $uri, $durationMs, $modificationTime, $creationTime,
-        $artist, $album, $albumArtist, $trackNo, $artworkUri)`
+        $artist, $album, $albumArtist, $trackNo, $discNo, $artworkUri)`
   );
   try {
     database.withTransactionSync(() => {
@@ -183,6 +196,7 @@ export function upsertTracks(rows: TrackRow[]): void {
           $album: r.album,
           $albumArtist: r.albumArtist,
           $trackNo: r.trackNo,
+          $discNo: r.discNo,
           $artworkUri: r.artworkUri,
         });
       }

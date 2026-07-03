@@ -31,8 +31,10 @@ export type ParsedTags = {
   album?: string;
   /** Artiste de l'album (TPE2) : sert à regrouper les compilations sous un même artiste. */
   albumArtist?: string;
-  /** Numéro de piste (TRCK), pour ordonner les pistes d'un album. */
+  /** Numéro de piste (TRCK), pour ordonner les pistes au sein d'un disque. */
   trackNo?: number;
+  /** Numéro de disque (TPOS), pour ordonner les albums multi-disques avant le n° de piste. */
+  discNo?: number;
   picture?: Picture;
 };
 
@@ -337,7 +339,11 @@ export function parseId3v2(header: Uint8Array, body: Uint8Array): ParsedTags {
         break;
       case 'TRCK':
       case 'TRK':
-        if (tags.trackNo == null) tags.trackNo = parseTrackNo(decodeTextField(data));
+        if (tags.trackNo == null) tags.trackNo = parsePosition(decodeTextField(data));
+        break;
+      case 'TPOS':
+      case 'TPA':
+        if (tags.discNo == null) tags.discNo = parsePosition(decodeTextField(data));
         break;
       case 'APIC':
       case 'PIC': {
@@ -391,8 +397,8 @@ function orUndefined(value: string): string | undefined {
   return value.length > 0 ? value : undefined;
 }
 
-/** Extrait le numéro de piste d'un champ TRCK (« 3 » ou « 3/12 »), ou `undefined`. */
-function parseTrackNo(value: string): number | undefined {
+/** Extrait un numéro de position d'un champ « 3 » ou « 3/12 » (TRCK, TPOS), ou `undefined`. */
+function parsePosition(value: string): number | undefined {
   const match = value.match(/\d+/);
   if (!match) {
     return undefined;
@@ -409,6 +415,7 @@ export function mergeTags(primary: ParsedTags | null, fallback: ParsedTags | nul
     album: primary?.album ?? fallback?.album,
     albumArtist: primary?.albumArtist ?? fallback?.albumArtist,
     trackNo: primary?.trackNo ?? fallback?.trackNo,
+    discNo: primary?.discNo ?? fallback?.discNo,
     picture: primary?.picture ?? fallback?.picture,
   };
 }
