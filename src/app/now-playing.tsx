@@ -138,7 +138,14 @@ export default function NowPlayingScreen() {
       {/* Actions secondaires */}
       <View style={styles.secondary}>
         <Icon name="lyrics" size={22} color={colors.textSecondary} />
-        <Icon name="queue_music" size={22} color={colors.textSecondary} />
+        <Pressable
+          onPress={() => router.push('/queue')}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Ouvrir la file d'attente"
+        >
+          <Icon name="queue_music" size={22} color={colors.textSecondary} />
+        </Pressable>
         <Icon name="cast" size={22} color={colors.textSecondary} />
       </View>
     </View>

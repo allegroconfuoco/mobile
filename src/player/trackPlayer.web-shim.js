@@ -49,6 +49,11 @@ const TrackPlayer = {
   skipToNext: asyncNoop,
   skipToPrevious: asyncNoop,
   setQueue: asyncNoop,
+  add: asyncNoop,
+  remove: asyncNoop,
+  move: asyncNoop,
+  getQueue: async () => [],
+  getActiveTrackIndex: async () => undefined,
   getPlaybackState: async () => ({ state: State.None }),
 };
 

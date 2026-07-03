@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -13,6 +13,7 @@ import { Image } from 'expo-image';
 
 import { colors, coverFallback, radii, spacing, typography } from '@/theme';
 import { Icon, type IconName } from '@/components/Icon';
+import { TrackActionsSheet } from '@/components/TrackActionsSheet';
 import { type LocalTrack, useAudioLibrary } from '@/library/useAudioLibrary';
 import { useTrackTags } from '@/library/useTrackTags';
 import { usePlayer } from '@/player/PlayerProvider';
@@ -81,8 +82,10 @@ type BodyProps = {
 };
 
 function LibraryBody({ status, tracks, error, onRequestPermission, onRescan }: BodyProps) {
-  const { playQueue } = usePlayer();
+  const { playQueue, playNext, addToQueue } = usePlayer();
   const { track: activeTrack } = usePlayback();
+  // Piste dont le menu d'actions (long-press) est ouvert, ou `null` si fermé.
+  const [menuTrack, setMenuTrack] = useState<LocalTrack | null>(null);
 
   switch (status) {
     case 'loading':
@@ -141,19 +144,28 @@ function LibraryBody({ status, tracks, error, onRequestPermission, onRescan }: B
         );
       }
       return (
-        <FlatList
-          data={tracks}
-          keyExtractor={(track) => track.id}
-          renderItem={({ item, index }) => (
-            <TrackRow
-              track={item}
-              isActive={item.id === activeTrack?.id}
-              onPress={() => void playQueue(tracks, index)}
-            />
-          )}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-        />
+        <>
+          <FlatList
+            data={tracks}
+            keyExtractor={(track) => track.id}
+            renderItem={({ item, index }) => (
+              <TrackRow
+                track={item}
+                isActive={item.id === activeTrack?.id}
+                onPress={() => void playQueue(tracks, index)}
+                onLongPress={() => setMenuTrack(item)}
+              />
+            )}
+            contentContainerStyle={styles.listContent}
+            showsVerticalScrollIndicator={false}
+          />
+          <TrackActionsSheet
+            title={menuTrack?.title ?? null}
+            onClose={() => setMenuTrack(null)}
+            onPlayNext={() => menuTrack && void playNext([menuTrack])}
+            onAddToQueue={() => menuTrack && void addToQueue([menuTrack])}
+          />
+        </>
       );
   }
 }
@@ -162,9 +174,10 @@ type TrackRowProps = {
   track: LocalTrack;
   isActive: boolean;
   onPress: () => void;
+  onLongPress: () => void;
 };
 
-function TrackRow({ track, isActive, onPress }: TrackRowProps) {
+function TrackRow({ track, isActive, onPress, onLongPress }: TrackRowProps) {
   // Tags ID3 lus paresseusement ; on retombe sur le nom de fichier tant qu'ils manquent.
   const { tags } = useTrackTags(track.id);
 
@@ -174,10 +187,13 @@ function TrackRow({ track, isActive, onPress }: TrackRowProps) {
   return (
     <Pressable
       onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={300}
       style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
       accessibilityRole="button"
       accessibilityState={isActive ? { selected: true } : {}}
       accessibilityLabel={`Lire ${title}`}
+      accessibilityHint="Appui long pour ajouter à la file"
     >
       <TrackCover uri={tags?.artworkUri ?? null} />
       <View style={styles.rowText}>

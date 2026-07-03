@@ -30,3 +30,24 @@ export async function toPlayerTrack(local: LocalTrack): Promise<Track> {
     duration: local.durationMs != null ? local.durationMs / 1000 : undefined,
   };
 }
+
+/**
+ * Résout une liste de pistes locales en pistes react-native-track-player.
+ *
+ * Les résolutions sont faites en parallèle ; toute piste dont l'URI est introuvable est
+ * ignorée (et journalisée) plutôt que de faire échouer l'ensemble. On garde donc une file
+ * cohérente même si un fichier a disparu entre le scan et la lecture.
+ */
+export async function resolvePlayerTracks(locals: LocalTrack[]): Promise<Track[]> {
+  const resolved = await Promise.all(
+    locals.map(async (local) => {
+      try {
+        return await toPlayerTrack(local);
+      } catch (e) {
+        console.warn('[player] URI introuvable, piste ignorée', local.filename, e);
+        return null;
+      }
+    })
+  );
+  return resolved.filter((track): track is Track => track !== null);
+}

@@ -53,6 +53,8 @@ export default function RootLayout() {
           <Stack.Screen name="(tabs)" />
           {/* Écran Lecture présenté en modal, au-dessus de la tab bar. */}
           <Stack.Screen name="now-playing" options={{ presentation: 'modal' }} />
+          {/* File d'attente, également en modal. */}
+          <Stack.Screen name="queue" options={{ presentation: 'modal' }} />
         </Stack>
       </PlayerProvider>
     </SafeAreaProvider>

@@ -35,7 +35,12 @@ export type IconName =
   | 'music_note'
   | 'graphic_eq'
   | 'lock'
-  | 'refresh';
+  | 'refresh'
+  | 'arrow_upward'
+  | 'arrow_downward'
+  | 'playlist_add'
+  | 'playlist_play'
+  | 'close';
 
 type IconProps = {
   name: IconName;
