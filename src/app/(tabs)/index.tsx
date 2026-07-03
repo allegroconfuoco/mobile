@@ -14,7 +14,8 @@ import { Image } from 'expo-image';
 import { colors, coverFallback, radii, spacing, typography } from '@/theme';
 import { Icon, type IconName } from '@/components/Icon';
 import { TrackActionsSheet } from '@/components/TrackActionsSheet';
-import { type LocalTrack, useAudioLibrary } from '@/library/useAudioLibrary';
+import type { LibraryStatus, LocalTrack } from '@/library/useAudioLibrary';
+import { useLibrary } from '@/library/LibraryProvider';
 import { useTrackTags } from '@/library/useTrackTags';
 import { usePlayer } from '@/player/PlayerProvider';
 import { usePlayback } from '@/player/usePlayback';
@@ -33,7 +34,7 @@ function formatDuration(ms: number | null): string {
 /** Onglet Bibliothèque : scanne et liste les fichiers audio locaux. */
 export default function LibraryScreen() {
   const insets = useSafeAreaInsets();
-  const { status, tracks, refreshing, error, requestPermission, rescan } = useAudioLibrary();
+  const { status, tracks, refreshing, error, requestPermission, rescan } = useLibrary();
 
   const subtitle = useMemo(() => {
     if (refreshing) {
@@ -77,7 +78,7 @@ export default function LibraryScreen() {
 }
 
 type BodyProps = {
-  status: ReturnType<typeof useAudioLibrary>['status'];
+  status: LibraryStatus;
   tracks: LocalTrack[];
   error: string | null;
   onRequestPermission: () => void;
@@ -86,6 +87,7 @@ type BodyProps = {
 
 function LibraryBody({ status, tracks, error, onRequestPermission, onRescan }: BodyProps) {
   const { playQueue, playNext, addToQueue } = usePlayer();
+  const { setTrackExcluded } = useLibrary();
   const { track: activeTrack } = usePlayback();
   // Piste dont le menu d'actions (long-press) est ouvert, ou `null` si fermé.
   const [menuTrack, setMenuTrack] = useState<LocalTrack | null>(null);
@@ -167,6 +169,7 @@ function LibraryBody({ status, tracks, error, onRequestPermission, onRescan }: B
             onClose={() => setMenuTrack(null)}
             onPlayNext={() => menuTrack && void playNext([menuTrack])}
             onAddToQueue={() => menuTrack && void addToQueue([menuTrack])}
+            onExclude={() => menuTrack && setTrackExcluded(menuTrack.id, true)}
           />
         </>
       );

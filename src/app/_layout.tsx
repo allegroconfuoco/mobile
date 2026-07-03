@@ -15,6 +15,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { colors } from '@/theme';
 import { PlayerProvider } from '@/player/PlayerProvider';
+import { LibraryProvider } from '@/library/LibraryProvider';
 
 // Garde le splash affiché tant que les polices ne sont pas prêtes.
 SplashScreen.preventAutoHideAsync();
@@ -43,20 +44,24 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <StatusBar style="light" />
-      <PlayerProvider>
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: colors.background },
-          }}
-        >
-          <Stack.Screen name="(tabs)" />
-          {/* Écran Lecture présenté en modal, au-dessus de la tab bar. */}
-          <Stack.Screen name="now-playing" options={{ presentation: 'modal' }} />
-          {/* File d'attente, également en modal. */}
-          <Stack.Screen name="queue" options={{ presentation: 'modal' }} />
-        </Stack>
-      </PlayerProvider>
+      <LibraryProvider>
+        <PlayerProvider>
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: colors.background },
+            }}
+          >
+            <Stack.Screen name="(tabs)" />
+            {/* Écran Lecture présenté en modal, au-dessus de la tab bar. */}
+            <Stack.Screen name="now-playing" options={{ presentation: 'modal' }} />
+            {/* File d'attente, également en modal. */}
+            <Stack.Screen name="queue" options={{ presentation: 'modal' }} />
+            {/* Réglages > Bibliothèque locale (dossiers scannés / exclusions). */}
+            <Stack.Screen name="library-settings" />
+          </Stack>
+        </PlayerProvider>
+      </LibraryProvider>
     </SafeAreaProvider>
   );
 }

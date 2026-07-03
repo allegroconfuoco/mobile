@@ -16,6 +16,8 @@ export type TrackActionsSheetProps = {
   onClose: () => void;
   onPlayNext: () => void;
   onAddToQueue: () => void;
+  /** Exclut la piste de la bibliothèque (et des scans suivants). */
+  onExclude: () => void;
 };
 
 export function TrackActionsSheet({
@@ -23,6 +25,7 @@ export function TrackActionsSheet({
   onClose,
   onPlayNext,
   onAddToQueue,
+  onExclude,
 }: TrackActionsSheetProps) {
   const insets = useSafeAreaInsets();
   const visible = title !== null;
@@ -49,6 +52,7 @@ export function TrackActionsSheet({
           </Text>
           <Action icon="playlist_play" label="Lire ensuite" onPress={run(onPlayNext)} />
           <Action icon="playlist_add" label="Ajouter à la file" onPress={run(onAddToQueue)} />
+          <Action icon="block" label="Exclure de la bibliothèque" onPress={run(onExclude)} />
         </Pressable>
       </Pressable>
     </Modal>
