@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -65,55 +66,75 @@ const QueueContext = createContext<QueueState | null>(null);
 export function PlayerProvider({ children }: { children: ReactNode }) {
   const [queue, setQueue] = useState<QueueState>({ tracks: [], activeIndex: undefined });
 
+  // Sérialise les opérations qui touchent à la file. Les mutations rapides (déplacements
+  // successifs) s'enchaînent alors strictement, sans s'entrelacer : chaque `refreshQueue` lit
+  // donc un état natif stable, et le snapshot reste cohérent (l'index pointe bien sur sa piste).
+  const opChain = useRef<Promise<unknown>>(Promise.resolve());
+  const enqueue = useCallback(<T,>(op: () => Promise<T>): Promise<T> => {
+    const run = opChain.current.then(op, op);
+    // On avale les erreurs sur la chaîne interne pour qu'un échec ne bloque pas les ops suivantes ;
+    // l'appelant, lui, reçoit la vraie promesse (`run`) et peut réagir à l'erreur.
+    opChain.current = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }, []);
+
+  // Numéro de séquence : seul le dernier `refreshQueue` déclenché a le droit de publier son
+  // résultat, pour qu'une lecture native plus lente à revenir n'écrase pas un snapshot plus récent.
+  const refreshSeq = useRef(0);
+
   // Recharge le snapshot de la file depuis le lecteur (source de vérité).
   const refreshQueue = useCallback(async () => {
     if (!(await ensurePlayerReady())) {
       return;
     }
+    const seq = ++refreshSeq.current;
     const [tracks, activeIndex] = await Promise.all([
       TrackPlayer.getQueue(),
       TrackPlayer.getActiveTrackIndex(),
     ]);
+    if (seq !== refreshSeq.current) {
+      return; // Un refresh plus récent a été demandé entre-temps : ce résultat est périmé.
+    }
     setQueue({ tracks, activeIndex });
   }, []);
 
   useEffect(() => {
-    void ensurePlayerReady().then((ready) => {
-      if (ready) {
-        void refreshQueue();
-      }
-    });
+    void enqueue(refreshQueue);
 
     // La piste active change sur skip, avancement naturel et remplacement de file : autant de
-    // moments où le snapshot doit se resynchroniser. Les mutations (add/remove/move) rafraîchissent
-    // en plus directement, car elles ne changent pas forcément la piste active.
+    // moments où le snapshot doit se resynchroniser. On passe par la même file d'opérations pour
+    // ne pas lire l'état natif au milieu d'une mutation en cours.
     const sub = TrackPlayer.addEventListener(Event.PlaybackActiveTrackChanged, () => {
-      void refreshQueue();
+      void enqueue(refreshQueue);
     });
     return () => sub.remove();
-  }, [refreshQueue]);
+  }, [enqueue, refreshQueue]);
 
   const playQueue = useCallback(
-    async (tracks: LocalTrack[], startIndex: number) => {
-      if (!(await ensurePlayerReady()) || tracks.length === 0) {
-        return;
-      }
-      const targetId = tracks[startIndex]?.id;
-      const resolved = await resolvePlayerTracks(tracks);
-      if (resolved.length === 0) {
-        return;
-      }
-      const resumeIndex = Math.max(
-        0,
-        resolved.findIndex((track) => track.id === targetId)
-      );
+    (tracks: LocalTrack[], startIndex: number) =>
+      enqueue(async () => {
+        if (!(await ensurePlayerReady()) || tracks.length === 0) {
+          return;
+        }
+        const targetId = tracks[startIndex]?.id;
+        const resolved = await resolvePlayerTracks(tracks);
+        if (resolved.length === 0) {
+          return;
+        }
+        const resumeIndex = Math.max(
+          0,
+          resolved.findIndex((track) => track.id === targetId)
+        );
 
-      await TrackPlayer.setQueue(resolved);
-      await TrackPlayer.skip(resumeIndex);
-      await TrackPlayer.play();
-      await refreshQueue();
-    },
-    [refreshQueue]
+        await TrackPlayer.setQueue(resolved);
+        await TrackPlayer.skip(resumeIndex);
+        await TrackPlayer.play();
+        await refreshQueue();
+      }),
+    [enqueue, refreshQueue]
   );
 
   const togglePlayPause = useCallback(async () => {
@@ -133,70 +154,75 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const seekTo = useCallback((seconds: number) => void TrackPlayer.seekTo(seconds), []);
 
   const addToQueue = useCallback(
-    async (tracks: LocalTrack[]) => {
-      if (!(await ensurePlayerReady())) {
-        return;
-      }
-      const resolved = await resolvePlayerTracks(tracks);
-      if (resolved.length === 0) {
-        return;
-      }
-      await TrackPlayer.add(resolved);
-      await refreshQueue();
-    },
-    [refreshQueue]
+    (tracks: LocalTrack[]) =>
+      enqueue(async () => {
+        if (!(await ensurePlayerReady())) {
+          return;
+        }
+        const resolved = await resolvePlayerTracks(tracks);
+        if (resolved.length === 0) {
+          return;
+        }
+        await TrackPlayer.add(resolved);
+        await refreshQueue();
+      }),
+    [enqueue, refreshQueue]
   );
 
   const playNext = useCallback(
-    async (tracks: LocalTrack[]) => {
-      if (!(await ensurePlayerReady())) {
-        return;
-      }
-      const resolved = await resolvePlayerTracks(tracks);
-      if (resolved.length === 0) {
-        return;
-      }
-      // Sans piste active (file vide), on ajoute simplement à la fin.
-      const activeIndex = await TrackPlayer.getActiveTrackIndex();
-      const insertBefore = activeIndex != null ? activeIndex + 1 : undefined;
-      await TrackPlayer.add(resolved, insertBefore);
-      await refreshQueue();
-    },
-    [refreshQueue]
+    (tracks: LocalTrack[]) =>
+      enqueue(async () => {
+        if (!(await ensurePlayerReady())) {
+          return;
+        }
+        const resolved = await resolvePlayerTracks(tracks);
+        if (resolved.length === 0) {
+          return;
+        }
+        // Sans piste active (file vide), on ajoute simplement à la fin.
+        const activeIndex = await TrackPlayer.getActiveTrackIndex();
+        const insertBefore = activeIndex != null ? activeIndex + 1 : undefined;
+        await TrackPlayer.add(resolved, insertBefore);
+        await refreshQueue();
+      }),
+    [enqueue, refreshQueue]
   );
 
   const removeFromQueue = useCallback(
-    async (index: number) => {
-      if (!(await ensurePlayerReady())) {
-        return;
-      }
-      await TrackPlayer.remove(index);
-      await refreshQueue();
-    },
-    [refreshQueue]
+    (index: number) =>
+      enqueue(async () => {
+        if (!(await ensurePlayerReady())) {
+          return;
+        }
+        await TrackPlayer.remove(index);
+        await refreshQueue();
+      }),
+    [enqueue, refreshQueue]
   );
 
   const moveInQueue = useCallback(
-    async (fromIndex: number, toIndex: number) => {
-      if (!(await ensurePlayerReady())) {
-        return;
-      }
-      await TrackPlayer.move(fromIndex, toIndex);
-      await refreshQueue();
-    },
-    [refreshQueue]
+    (fromIndex: number, toIndex: number) =>
+      enqueue(async () => {
+        if (!(await ensurePlayerReady())) {
+          return;
+        }
+        await TrackPlayer.move(fromIndex, toIndex);
+        await refreshQueue();
+      }),
+    [enqueue, refreshQueue]
   );
 
   const skipToIndex = useCallback(
-    async (index: number) => {
-      if (!(await ensurePlayerReady())) {
-        return;
-      }
-      await TrackPlayer.skip(index);
-      await TrackPlayer.play();
-      await refreshQueue();
-    },
-    [refreshQueue]
+    (index: number) =>
+      enqueue(async () => {
+        if (!(await ensurePlayerReady())) {
+          return;
+        }
+        await TrackPlayer.skip(index);
+        await TrackPlayer.play();
+        await refreshQueue();
+      }),
+    [enqueue, refreshQueue]
   );
 
   const actions = useMemo<PlayerActions & QueueActions>(

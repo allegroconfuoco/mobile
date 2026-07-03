@@ -38,6 +38,7 @@ export type IconName =
   | 'refresh'
   | 'arrow_upward'
   | 'arrow_downward'
+  | 'drag_indicator'
   | 'playlist_add'
   | 'playlist_play'
   | 'close';
