@@ -1,6 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
-import { type LayoutChangeEvent, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  type LayoutChangeEvent,
+  PanResponder,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 
@@ -28,17 +35,59 @@ export default function NowPlayingScreen() {
   const { togglePlayPause, skipToNext, skipToPrevious, seekTo } = usePlayer();
 
   const [barWidth, setBarWidth] = useState(0);
+  // Fraction visée pendant un glissement (scrubbing). `null` = pas de glissement en cours :
+  // on suit alors la position réelle du lecteur. Pendant le geste, on n'appelle `seekTo`
+  // qu'au lâcher pour ne pas bombarder le lecteur de sauts à chaque frame.
+  const [scrubFraction, setScrubFraction] = useState<number | null>(null);
 
-  const onSeek = (event: { nativeEvent: { locationX: number } }) => {
-    if (barWidth <= 0 || duration <= 0) {
-      return;
+  // Le PanResponder n'est créé qu'une fois ; il lit largeur/durée/callback via une ref mise à
+  // jour hors rendu (effet), pour ne pas recréer le responder en plein geste et éviter des
+  // closures périmées quand la piste (durée) change.
+  const seekRef = useRef({ barWidth, duration, seekTo });
+  useEffect(() => {
+    seekRef.current = { barWidth, duration, seekTo };
+  });
+
+  const fractionAt = (locationX: number): number => {
+    const { barWidth: width } = seekRef.current;
+    if (width <= 0) {
+      return 0;
     }
-    const fraction = Math.min(1, Math.max(0, event.nativeEvent.locationX / barWidth));
-    seekTo(fraction * duration);
+    return Math.min(1, Math.max(0, locationX / width));
   };
 
-  const progress = duration > 0 ? Math.min(1, position / duration) : 0;
-  const remaining = duration > 0 ? duration - position : 0;
+  // Barre de progression déplaçable : tap OU glissement (le knob suit le doigt, seek au lâcher).
+  // `PanResponder` du cœur RN, comme la file (reanimated/gesture-handler non configurés, cf. CLAUDE.md).
+  // `seekRef` n'est lue que dans les handlers de geste (jamais pendant le rendu) : la règle
+  // react-hooks/refs donne un faux positif sur la capture par useMemo.
+  /* eslint-disable react-hooks/refs */
+  const seekResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderGrant: (e) => setScrubFraction(fractionAt(e.nativeEvent.locationX)),
+        onPanResponderMove: (e) => setScrubFraction(fractionAt(e.nativeEvent.locationX)),
+        onPanResponderRelease: (e) => {
+          const fraction = fractionAt(e.nativeEvent.locationX);
+          const { duration: dur, seekTo: seek } = seekRef.current;
+          if (dur > 0) {
+            seek(fraction * dur);
+          }
+          setScrubFraction(null);
+        },
+        onPanResponderTerminate: () => setScrubFraction(null),
+      }),
+    []
+  );
+  /* eslint-enable react-hooks/refs */
+
+  const scrubbing = scrubFraction !== null;
+  const liveProgress = duration > 0 ? Math.min(1, position / duration) : 0;
+  // Pendant un glissement, l'affichage suit le doigt ; sinon, la lecture réelle.
+  const progress = scrubFraction ?? liveProgress;
+  const displayPosition = scrubbing ? progress * duration : position;
+  const remaining = duration > 0 ? Math.max(0, duration - displayPosition) : 0;
   const title = track?.title ?? 'Aucune lecture';
   const artist = track?.artist ?? '—';
   const artwork = typeof track?.artwork === 'string' ? track.artwork : null;
@@ -85,10 +134,10 @@ export default function NowPlayingScreen() {
         </View>
       </View>
 
-      {/* Progression (tap pour se déplacer) */}
+      {/* Progression (tap ou glissement pour se déplacer) */}
       <View style={styles.progressBlock}>
-        <Pressable
-          onPress={onSeek}
+        <View
+          {...seekResponder.panHandlers}
           onLayout={(e: LayoutChangeEvent) => setBarWidth(e.nativeEvent.layout.width)}
           hitSlop={12}
           accessibilityRole="adjustable"
@@ -96,11 +145,17 @@ export default function NowPlayingScreen() {
         >
           <View style={styles.progressTrack}>
             <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
-            <View style={[styles.progressKnob, { left: `${progress * 100}%` }]} />
+            <View
+              style={[
+                styles.progressKnob,
+                scrubbing && styles.progressKnobActive,
+                { left: `${progress * 100}%` },
+              ]}
+            />
           </View>
-        </Pressable>
+        </View>
         <View style={styles.times}>
-          <Text style={styles.time}>{formatTime(position)}</Text>
+          <Text style={styles.time}>{formatTime(displayPosition)}</Text>
           <Text style={styles.time}>-{formatTime(remaining)}</Text>
         </View>
       </View>
@@ -225,6 +280,12 @@ const styles = StyleSheet.create({
     height: 11,
     marginLeft: -5.5,
     backgroundColor: colors.accent,
+  },
+  // Pendant le glissement : knob agrandi pour un retour tactile clair (marge ajustée pour rester centré).
+  progressKnobActive: {
+    width: 15,
+    height: 15,
+    marginLeft: -7.5,
   },
   times: {
     flexDirection: 'row',
