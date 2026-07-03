@@ -26,6 +26,16 @@ export type TrackRow = {
   durationMs: number | null;
   modificationTime: number | null;
   creationTime: number | null;
+  /** Artiste (tag ID3), lu au scan. `null` si absent/illisible. */
+  artist: string | null;
+  /** Album (tag ID3), lu au scan. */
+  album: string | null;
+  /** Artiste de l'album (tag ID3 TPE2) : regroupe les compilations. */
+  albumArtist: string | null;
+  /** Numéro de piste (tag ID3), pour ordonner un album. */
+  trackNo: number | null;
+  /** URI `file://` d'une pochette extraite en cache au scan, ou `null`. */
+  artworkUri: string | null;
 };
 
 /** Décision d'inclusion d'un dossier dans la bibliothèque. */
@@ -33,7 +43,7 @@ export type FolderPref = { folder: string; included: boolean };
 
 const isSupported = Platform.OS !== 'web';
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 let dbInstance: SQLite.SQLiteDatabase | null = null;
 
@@ -49,31 +59,56 @@ function db(): SQLite.SQLiteDatabase | null {
   return dbInstance;
 }
 
+/**
+ * Migre la base par paliers de version (`PRAGMA user_version`). Chaque palier est idempotent
+ * et ne s'applique qu'une fois ; un nouvel appareil traverse tous les paliers d'affilée.
+ */
 function migrate(database: SQLite.SQLiteDatabase): void {
   const row = database.getFirstSync<{ user_version: number }>('PRAGMA user_version');
-  if ((row?.user_version ?? 0) >= SCHEMA_VERSION) {
+  const current = row?.user_version ?? 0;
+  if (current >= SCHEMA_VERSION) {
     return;
   }
-  database.execSync(`
-    CREATE TABLE IF NOT EXISTS tracks (
-      id TEXT PRIMARY KEY NOT NULL,
-      filename TEXT NOT NULL,
-      title TEXT NOT NULL,
-      folder TEXT NOT NULL,
-      uri TEXT,
-      duration_ms INTEGER,
-      modification_time INTEGER,
-      creation_time INTEGER
-    );
-    CREATE INDEX IF NOT EXISTS idx_tracks_folder ON tracks (folder);
-    CREATE TABLE IF NOT EXISTS folder_prefs (
-      folder TEXT PRIMARY KEY NOT NULL,
-      included INTEGER NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS excluded_tracks (
-      track_id TEXT PRIMARY KEY NOT NULL
-    );
-  `);
+
+  // v1 : schéma initial (pistes + préférences de dossiers + exclusions).
+  if (current < 1) {
+    database.execSync(`
+      CREATE TABLE IF NOT EXISTS tracks (
+        id TEXT PRIMARY KEY NOT NULL,
+        filename TEXT NOT NULL,
+        title TEXT NOT NULL,
+        folder TEXT NOT NULL,
+        uri TEXT,
+        duration_ms INTEGER,
+        modification_time INTEGER,
+        creation_time INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_tracks_folder ON tracks (folder);
+      CREATE TABLE IF NOT EXISTS folder_prefs (
+        folder TEXT PRIMARY KEY NOT NULL,
+        included INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS excluded_tracks (
+        track_id TEXT PRIMARY KEY NOT NULL
+      );
+    `);
+  }
+
+  // v2 : métadonnées de tags (artiste/album/album artist/n° piste/pochette) lues au scan.
+  // On vide `tracks` pour forcer un re-scan complet : les lignes existantes (issue #10) n'ont
+  // pas ces colonnes et le diff incrémental ne les relirait jamais autrement. Les préférences
+  // de dossiers et les exclusions, elles, sont conservées.
+  if (current < 2) {
+    database.execSync(`
+      ALTER TABLE tracks ADD COLUMN artist TEXT;
+      ALTER TABLE tracks ADD COLUMN album TEXT;
+      ALTER TABLE tracks ADD COLUMN album_artist TEXT;
+      ALTER TABLE tracks ADD COLUMN track_no INTEGER;
+      ALTER TABLE tracks ADD COLUMN artwork_uri TEXT;
+      DELETE FROM tracks;
+    `);
+  }
+
   database.execSync(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -87,7 +122,11 @@ export function loadTracks(): TrackRow[] {
     `SELECT id, filename, title, folder, uri,
             duration_ms AS durationMs,
             modification_time AS modificationTime,
-            creation_time AS creationTime
+            creation_time AS creationTime,
+            artist, album,
+            album_artist AS albumArtist,
+            track_no AS trackNo,
+            artwork_uri AS artworkUri
        FROM tracks
        ORDER BY modification_time DESC`
   );
@@ -123,8 +162,10 @@ export function upsertTracks(rows: TrackRow[]): void {
   }
   const stmt = database.prepareSync(
     `INSERT OR REPLACE INTO tracks
-       (id, filename, title, folder, uri, duration_ms, modification_time, creation_time)
-     VALUES ($id, $filename, $title, $folder, $uri, $durationMs, $modificationTime, $creationTime)`
+       (id, filename, title, folder, uri, duration_ms, modification_time, creation_time,
+        artist, album, album_artist, track_no, artwork_uri)
+     VALUES ($id, $filename, $title, $folder, $uri, $durationMs, $modificationTime, $creationTime,
+        $artist, $album, $albumArtist, $trackNo, $artworkUri)`
   );
   try {
     database.withTransactionSync(() => {
@@ -138,6 +179,11 @@ export function upsertTracks(rows: TrackRow[]): void {
           $durationMs: r.durationMs,
           $modificationTime: r.modificationTime,
           $creationTime: r.creationTime,
+          $artist: r.artist,
+          $album: r.album,
+          $albumArtist: r.albumArtist,
+          $trackNo: r.trackNo,
+          $artworkUri: r.artworkUri,
         });
       }
     });

@@ -29,6 +29,10 @@ export type ParsedTags = {
   title?: string;
   artist?: string;
   album?: string;
+  /** Artiste de l'album (TPE2) : sert à regrouper les compilations sous un même artiste. */
+  albumArtist?: string;
+  /** Numéro de piste (TRCK), pour ordonner les pistes d'un album. */
+  trackNo?: number;
   picture?: Picture;
 };
 
@@ -327,6 +331,14 @@ export function parseId3v2(header: Uint8Array, body: Uint8Array): ParsedTags {
       case 'TAL':
         if (!tags.album) tags.album = orUndefined(decodeTextField(data));
         break;
+      case 'TPE2':
+      case 'TP2':
+        if (!tags.albumArtist) tags.albumArtist = orUndefined(decodeTextField(data));
+        break;
+      case 'TRCK':
+      case 'TRK':
+        if (tags.trackNo == null) tags.trackNo = parseTrackNo(decodeTextField(data));
+        break;
       case 'APIC':
       case 'PIC': {
         if (!pictureIsFront) {
@@ -379,12 +391,24 @@ function orUndefined(value: string): string | undefined {
   return value.length > 0 ? value : undefined;
 }
 
+/** Extrait le numéro de piste d'un champ TRCK (« 3 » ou « 3/12 »), ou `undefined`. */
+function parseTrackNo(value: string): number | undefined {
+  const match = value.match(/\d+/);
+  if (!match) {
+    return undefined;
+  }
+  const n = parseInt(match[0], 10);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
 /** Fusionne deux jeux de tags : `primary` gagne, `fallback` comble les trous. */
 export function mergeTags(primary: ParsedTags | null, fallback: ParsedTags | null): ParsedTags {
   return {
     title: primary?.title ?? fallback?.title,
     artist: primary?.artist ?? fallback?.artist,
     album: primary?.album ?? fallback?.album,
+    albumArtist: primary?.albumArtist ?? fallback?.albumArtist,
+    trackNo: primary?.trackNo ?? fallback?.trackNo,
     picture: primary?.picture ?? fallback?.picture,
   };
 }

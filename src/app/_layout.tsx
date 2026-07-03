@@ -59,6 +59,9 @@ export default function RootLayout() {
             <Stack.Screen name="queue" options={{ presentation: 'modal' }} />
             {/* Réglages > Bibliothèque locale (dossiers scannés / exclusions). */}
             <Stack.Screen name="library-settings" />
+            {/* Détails Bibliothèque (poussés) : morceaux d'un artiste / pistes d'un album. */}
+            <Stack.Screen name="artist" />
+            <Stack.Screen name="album" />
           </Stack>
         </PlayerProvider>
       </LibraryProvider>

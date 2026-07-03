@@ -11,6 +11,15 @@ import {
 
 import * as db from './db';
 import { displayFolder, folderOf, isAutoExcluded } from './folders';
+import { extractTrackTags, type TrackTags } from './trackTags';
+import {
+  buildAlbums,
+  buildArtists,
+  sortTracks,
+  type AlbumGroup,
+  type ArtistGroup,
+  type TrackSort,
+} from './grouping';
 
 /**
  * Un morceau audio détecté sur l'appareil.
@@ -22,7 +31,7 @@ import { displayFolder, folderOf, isAutoExcluded } from './folders';
 export type LocalTrack = {
   /** ID du media store (contentUri Android) — sert à ré-instancier un `Asset`. */
   id: string;
-  /** Titre affiché : nom de fichier sans extension. */
+  /** Titre affiché : tag ID3 s'il existe, sinon nom de fichier sans extension. */
   title: string;
   /** Nom de fichier complet, extension comprise. */
   filename: string;
@@ -30,6 +39,16 @@ export type LocalTrack = {
   durationMs: number | null;
   /** Dossier parent (chemin absolu), ou `''` si non résolu. */
   folder: string;
+  /** Artiste (tag ID3), lu au scan, ou `null`. */
+  artist: string | null;
+  /** Album (tag ID3), ou `null`. */
+  album: string | null;
+  /** Artiste de l'album (tag ID3 TPE2), ou `null`. */
+  albumArtist: string | null;
+  /** Numéro de piste (tag ID3), ou `null`. */
+  trackNo: number | null;
+  /** URI `file://` d'une pochette extraite en cache au scan, ou `null`. */
+  artworkUri: string | null;
 };
 
 /** Un dossier de la bibliothèque, pour l'écran de réglages. */
@@ -59,22 +78,43 @@ const isSupported = Platform.OS !== 'web';
 // Nombre de résolutions d'URI en parallèle au scan (les nouveaux fichiers uniquement).
 const RESOLVE_CONCURRENCY = 8;
 
+const NO_TAGS: TrackTags = {
+  title: null,
+  artist: null,
+  album: null,
+  albumArtist: null,
+  trackNo: null,
+  artworkUri: null,
+};
+
 function stripExtension(name: string): string {
   const dot = name.lastIndexOf('.');
   return dot > 0 ? name.slice(0, dot) : name;
 }
 
-function toRow(meta: AssetMetadata, folder: string, uri: string | null): db.TrackRow {
+function toRow(
+  meta: AssetMetadata,
+  folder: string,
+  uri: string | null,
+  tags: TrackTags
+): db.TrackRow {
   const filename = meta.filename ?? 'Fichier inconnu';
+  const fallbackTitle = meta.filename ? stripExtension(meta.filename) : 'Titre inconnu';
   return {
     id: meta.id,
     filename,
-    title: meta.filename ? stripExtension(meta.filename) : 'Titre inconnu',
+    // Le tag ID3 prime sur le nom de fichier ; repli propre s'il manque.
+    title: tags.title ?? fallbackTitle,
     folder,
     uri,
     durationMs: meta.duration,
     modificationTime: meta.modificationTime,
     creationTime: meta.creationTime,
+    artist: tags.artist,
+    album: tags.album,
+    albumArtist: tags.albumArtist,
+    trackNo: tags.trackNo,
+    artworkUri: tags.artworkUri,
   };
 }
 
@@ -85,10 +125,21 @@ function rowToTrack(r: db.TrackRow): LocalTrack {
     filename: r.filename,
     durationMs: r.durationMs,
     folder: r.folder,
+    artist: r.artist,
+    album: r.album,
+    albumArtist: r.albumArtist,
+    trackNo: r.trackNo,
+    artworkUri: r.artworkUri,
   };
 }
 
-/** Résout le dossier (via `getUri`) d'un lot de nouvelles pistes, en parallèle borné. */
+/**
+ * Résout le dossier et les tags ID3 d'un lot de nouvelles pistes, en parallèle borné.
+ *
+ * L'URI (via `getUri`) sert à la fois à déduire le dossier et à lire les tags : une seule
+ * résolution par piste. L'extraction des tags est synchrone (lecture partielle du fichier) et
+ * peuple aussi le cache mémoire de `trackTags`, donc l'affichage n'a plus besoin de relire.
+ */
 async function resolveRows(metas: AssetMetadata[]): Promise<db.TrackRow[]> {
   const rows = new Array<db.TrackRow>(metas.length);
   let next = 0;
@@ -98,13 +149,15 @@ async function resolveRows(metas: AssetMetadata[]): Promise<db.TrackRow[]> {
       const meta = metas[idx];
       let uri: string | null = null;
       let folder = '';
+      let tags = NO_TAGS;
       try {
         uri = await new Asset(meta.id).getUri();
         folder = folderOf(uri);
+        tags = extractTrackTags(meta.id, uri);
       } catch (e) {
-        console.warn('[useAudioLibrary] URI introuvable', e);
+        console.warn('[useAudioLibrary] URI/tags introuvables', e);
       }
-      rows[idx] = toRow(meta, folder, uri);
+      rows[idx] = toRow(meta, folder, uri, tags);
     }
   };
   await Promise.all(
@@ -123,8 +176,16 @@ function prefsToMap(prefs: db.FolderPref[]): Record<string, boolean> {
 
 type UseAudioLibrary = {
   status: LibraryStatus;
-  /** Pistes visibles : dossier inclus ET non exclues individuellement. */
+  /** Pistes visibles (dossier inclus ET non exclues), triées selon `trackSort`. */
   tracks: LocalTrack[];
+  /** Critère de tri courant de la liste des morceaux. */
+  trackSort: TrackSort;
+  /** Change le tri de la liste des morceaux (titre / artiste). */
+  setTrackSort: (sort: TrackSort) => void;
+  /** Artistes de la bibliothèque, agrégés et triés (onglet Artistes). */
+  artists: ArtistGroup[];
+  /** Albums de la bibliothèque, agrégés et triés (onglet Albums). */
+  albums: AlbumGroup[];
   /** Un scan de fond tourne alors qu'un cache est déjà affiché. */
   refreshing: boolean;
   error: string | null;
@@ -165,6 +226,7 @@ export function useAudioLibrary(): UseAudioLibrary {
   );
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [trackSort, setTrackSort] = useState<TrackSort>('title');
 
   const scan = useCallback(async () => {
     if (!isSupported) {
@@ -221,10 +283,16 @@ export function useAudioLibrary(): UseAudioLibrary {
 
   const isIncluded = useCallback((folder: string) => folderPrefs[folder] ?? true, [folderPrefs]);
 
-  const tracks = useMemo(
+  // Pistes visibles, non triées : base commune du tri des morceaux et des regroupements.
+  const visibleTracks = useMemo(
     () => allTracks.filter((t) => isIncluded(t.folder) && !excludedIds.has(t.id)).map(rowToTrack),
     [allTracks, isIncluded, excludedIds]
   );
+
+  const tracks = useMemo(() => sortTracks(visibleTracks, trackSort), [visibleTracks, trackSort]);
+
+  const artists = useMemo(() => buildArtists(visibleTracks), [visibleTracks]);
+  const albums = useMemo(() => buildAlbums(visibleTracks), [visibleTracks]);
 
   const folders = useMemo<LibraryFolder[]>(() => {
     const counts = new Map<string, number>();
@@ -282,6 +350,10 @@ export function useAudioLibrary(): UseAudioLibrary {
   return {
     status,
     tracks,
+    trackSort,
+    setTrackSort,
+    artists,
+    albums,
     refreshing: scanning && hasCache,
     error,
     folders,

@@ -21,11 +21,22 @@ export type TrackTags = {
   title: string | null;
   artist: string | null;
   album: string | null;
+  /** Artiste de l'album (TPE2), pour regrouper les compilations, ou `null`. */
+  albumArtist: string | null;
+  /** Numéro de piste (TRCK), pour ordonner un album, ou `null`. */
+  trackNo: number | null;
   /** URI `file://` d'une pochette extraite et mise en cache, ou `null`. */
   artworkUri: string | null;
 };
 
-const EMPTY_TAGS: TrackTags = { title: null, artist: null, album: null, artworkUri: null };
+const EMPTY_TAGS: TrackTags = {
+  title: null,
+  artist: null,
+  album: null,
+  albumArtist: null,
+  trackNo: null,
+  artworkUri: null,
+};
 
 const isSupported = Platform.OS !== 'web';
 
@@ -109,18 +120,17 @@ function readParsedTags(uri: string): ParsedTags | null {
   }
 }
 
-async function resolveTags(assetId: string): Promise<TrackTags> {
+/**
+ * Extrait et met en cache les tags d'une piste dont l'URI `file://` est déjà connue.
+ *
+ * Entièrement synchrone (lecture partielle + parsing + écriture pochette) : le scan de la
+ * bibliothèque, qui résout déjà l'URI via `getUri`, s'en sert pour peupler la base *et* le
+ * cache mémoire d'un coup, sans second aller-retour au media store.
+ */
+export function extractTrackTags(assetId: string, uri: string): TrackTags {
   if (!isSupported) {
     return EMPTY_TAGS;
   }
-  let uri: string;
-  try {
-    uri = await new Asset(assetId).getUri();
-  } catch (e) {
-    console.warn('[trackTags] URI introuvable', e);
-    return EMPTY_TAGS;
-  }
-
   let parsed: ParsedTags | null = null;
   try {
     parsed = readParsedTags(uri);
@@ -134,12 +144,30 @@ async function resolveTags(assetId: string): Promise<TrackTags> {
       ? persistCover(assetId, parsed.picture.mime, parsed.picture.data)
       : null;
 
-  return {
+  const tags: TrackTags = {
     title: parsed?.title ?? null,
     artist: parsed?.artist ?? null,
     album: parsed?.album ?? null,
+    albumArtist: parsed?.albumArtist ?? null,
+    trackNo: parsed?.trackNo ?? null,
     artworkUri,
   };
+  tagsCache.set(assetId, tags);
+  return tags;
+}
+
+async function resolveTags(assetId: string): Promise<TrackTags> {
+  if (!isSupported) {
+    return EMPTY_TAGS;
+  }
+  let uri: string;
+  try {
+    uri = await new Asset(assetId).getUri();
+  } catch (e) {
+    console.warn('[trackTags] URI introuvable', e);
+    return EMPTY_TAGS;
+  }
+  return extractTrackTags(assetId, uri);
 }
 
 /**

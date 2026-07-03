@@ -44,7 +44,10 @@ export type IconName =
   | 'folder'
   | 'block'
   | 'add'
-  | 'close';
+  | 'close'
+  | 'sort'
+  | 'person'
+  | 'album';
 
 type IconProps = {
   name: IconName;
