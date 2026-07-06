@@ -191,6 +191,12 @@ type UseAudioLibrary = {
   artists: ArtistGroup[];
   /** Albums de la bibliothèque, agrégés et triés (onglet Albums). */
   albums: AlbumGroup[];
+  /**
+   * Index de *toutes* les pistes scannées (dossiers exclus compris) par id.
+   * Sert à résoudre les références d'une playlist en `LocalTrack` : une piste ajoutée à une
+   * playlist reste jouable même si son dossier a été décoché ensuite dans les réglages.
+   */
+  tracksById: Map<string, LocalTrack>;
   /** Un scan de fond tourne alors qu'un cache est déjà affiché. */
   refreshing: boolean;
   error: string | null;
@@ -299,6 +305,16 @@ export function useAudioLibrary(): UseAudioLibrary {
   const artists = useMemo(() => buildArtists(visibleTracks), [visibleTracks]);
   const albums = useMemo(() => buildAlbums(visibleTracks), [visibleTracks]);
 
+  // Index sur *toutes* les pistes (pas seulement les visibles) : les playlists doivent pouvoir
+  // résoudre une piste même si son dossier est exclu de l'affichage biblio.
+  const tracksById = useMemo(() => {
+    const map = new Map<string, LocalTrack>();
+    for (const r of allTracks) {
+      map.set(r.id, rowToTrack(r));
+    }
+    return map;
+  }, [allTracks]);
+
   const folders = useMemo<LibraryFolder[]>(() => {
     const counts = new Map<string, number>();
     for (const t of allTracks) {
@@ -359,6 +375,7 @@ export function useAudioLibrary(): UseAudioLibrary {
     setTrackSort,
     artists,
     albums,
+    tracksById,
     refreshing: scanning && hasCache,
     error,
     folders,

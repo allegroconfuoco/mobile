@@ -16,6 +16,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { colors } from '@/theme';
 import { PlayerProvider } from '@/player/PlayerProvider';
 import { LibraryProvider } from '@/library/LibraryProvider';
+import { PlaylistsProvider } from '@/library/PlaylistsProvider';
 
 // Garde le splash affiché tant que les polices ne sont pas prêtes.
 SplashScreen.preventAutoHideAsync();
@@ -45,25 +46,29 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <StatusBar style="light" />
       <LibraryProvider>
-        <PlayerProvider>
-          <Stack
-            screenOptions={{
-              headerShown: false,
-              contentStyle: { backgroundColor: colors.background },
-            }}
-          >
-            <Stack.Screen name="(tabs)" />
-            {/* Écran Lecture présenté en modal, au-dessus de la tab bar. */}
-            <Stack.Screen name="now-playing" options={{ presentation: 'modal' }} />
-            {/* File d'attente, également en modal. */}
-            <Stack.Screen name="queue" options={{ presentation: 'modal' }} />
-            {/* Réglages > Bibliothèque locale (dossiers scannés / exclusions). */}
-            <Stack.Screen name="library-settings" />
-            {/* Détails Bibliothèque (poussés) : morceaux d'un artiste / pistes d'un album. */}
-            <Stack.Screen name="artist" />
-            <Stack.Screen name="album" />
-          </Stack>
-        </PlayerProvider>
+        <PlaylistsProvider>
+          <PlayerProvider>
+            <Stack
+              screenOptions={{
+                headerShown: false,
+                contentStyle: { backgroundColor: colors.background },
+              }}
+            >
+              <Stack.Screen name="(tabs)" />
+              {/* Écran Lecture présenté en modal, au-dessus de la tab bar. */}
+              <Stack.Screen name="now-playing" options={{ presentation: 'modal' }} />
+              {/* File d'attente, également en modal. */}
+              <Stack.Screen name="queue" options={{ presentation: 'modal' }} />
+              {/* Réglages > Bibliothèque locale (dossiers scannés / exclusions). */}
+              <Stack.Screen name="library-settings" />
+              {/* Détails Bibliothèque (poussés) : morceaux d'un artiste / pistes d'un album. */}
+              <Stack.Screen name="artist" />
+              <Stack.Screen name="album" />
+              {/* Détail d'une playlist (poussé). */}
+              <Stack.Screen name="playlist" />
+            </Stack>
+          </PlayerProvider>
+        </PlaylistsProvider>
       </LibraryProvider>
     </SafeAreaProvider>
   );

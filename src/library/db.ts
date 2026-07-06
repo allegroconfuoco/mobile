@@ -45,7 +45,7 @@ export type FolderPref = { folder: string; included: boolean };
 
 const isSupported = Platform.OS !== 'web';
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 let dbInstance: SQLite.SQLiteDatabase | null = null;
 
@@ -118,6 +118,30 @@ function migrate(database: SQLite.SQLiteDatabase): void {
     database.execSync(`
       ALTER TABLE tracks ADD COLUMN disc_no INTEGER;
       DELETE FROM tracks;
+    `);
+  }
+
+  // v4 : playlists locales (issue #14). Migration purement *additive* — on ne touche pas à
+  // `tracks` (contrairement à v2/v3) : les nouvelles tables sont vides au départ, aucun re-scan
+  // n'est nécessaire. `playlist_tracks` référence une piste par son id de media store (= `tracks.id`)
+  // et porte une `position` pour l'ordre ; unicité (playlist, piste) pour interdire les doublons.
+  if (current < 4) {
+    database.execSync(`
+      CREATE TABLE IF NOT EXISTS playlists (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS playlist_tracks (
+        playlist_id TEXT NOT NULL,
+        track_id TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        added_at INTEGER NOT NULL,
+        PRIMARY KEY (playlist_id, track_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_playlist_tracks_order
+        ON playlist_tracks (playlist_id, position);
     `);
   }
 
@@ -251,4 +275,146 @@ export function setTrackExcluded(id: string, excluded: boolean): void {
   } else {
     database.runSync('DELETE FROM excluded_tracks WHERE track_id = ?', [id]);
   }
+}
+
+// --- Playlists (issue #14) -------------------------------------------------------------------
+
+/** Une playlist persistée, avec son nombre de pistes (jointure). */
+export type PlaylistRow = {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  /** Nombre de pistes référencées (peut inclure des fichiers depuis disparus). */
+  trackCount: number;
+};
+
+/** Toutes les playlists, la plus récemment modifiée en tête. */
+export function loadPlaylists(): PlaylistRow[] {
+  const database = db();
+  if (!database) {
+    return [];
+  }
+  return database.getAllSync<PlaylistRow>(
+    `SELECT p.id, p.name,
+            p.created_at AS createdAt,
+            p.updated_at AS updatedAt,
+            COUNT(pt.track_id) AS trackCount
+       FROM playlists p
+       LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id
+      GROUP BY p.id
+      ORDER BY p.updated_at DESC`
+  );
+}
+
+/** Ids des pistes d'une playlist, dans l'ordre (`position`). */
+export function loadPlaylistTrackIds(playlistId: string): string[] {
+  const database = db();
+  if (!database) {
+    return [];
+  }
+  return database
+    .getAllSync<{ track_id: string }>(
+      'SELECT track_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY position',
+      [playlistId]
+    )
+    .map((r) => r.track_id);
+}
+
+/** Crée une playlist vide. */
+export function createPlaylist(id: string, name: string, now: number): void {
+  const database = db();
+  if (!database) {
+    return;
+  }
+  database.runSync('INSERT INTO playlists (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)', [
+    id,
+    name,
+    now,
+    now,
+  ]);
+}
+
+/** Renomme une playlist (et marque sa mise à jour). */
+export function renamePlaylist(id: string, name: string, now: number): void {
+  const database = db();
+  if (!database) {
+    return;
+  }
+  database.runSync('UPDATE playlists SET name = ?, updated_at = ? WHERE id = ?', [name, now, id]);
+}
+
+/** Supprime une playlist et toutes ses références de pistes (transaction). */
+export function deletePlaylist(id: string): void {
+  const database = db();
+  if (!database) {
+    return;
+  }
+  database.withTransactionSync(() => {
+    database.runSync('DELETE FROM playlist_tracks WHERE playlist_id = ?', [id]);
+    database.runSync('DELETE FROM playlists WHERE id = ?', [id]);
+  });
+}
+
+/**
+ * Ajoute des pistes à la fin d'une playlist. Les pistes déjà présentes sont ignorées
+ * (`INSERT OR IGNORE` sur la clé (playlist, piste)), pas de doublon ni de changement de position.
+ */
+export function addTracksToPlaylist(playlistId: string, trackIds: string[], now: number): void {
+  const database = db();
+  if (!database || trackIds.length === 0) {
+    return;
+  }
+  const maxRow = database.getFirstSync<{ maxPos: number | null }>(
+    'SELECT MAX(position) AS maxPos FROM playlist_tracks WHERE playlist_id = ?',
+    [playlistId]
+  );
+  let position = (maxRow?.maxPos ?? -1) + 1;
+  database.withTransactionSync(() => {
+    for (const trackId of trackIds) {
+      database.runSync(
+        `INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_id, position, added_at)
+         VALUES (?, ?, ?, ?)`,
+        [playlistId, trackId, position, now]
+      );
+      position += 1;
+    }
+    database.runSync('UPDATE playlists SET updated_at = ? WHERE id = ?', [now, playlistId]);
+  });
+}
+
+/** Retire une piste d'une playlist (les positions restantes gardent leur ordre relatif). */
+export function removeTrackFromPlaylist(playlistId: string, trackId: string, now: number): void {
+  const database = db();
+  if (!database) {
+    return;
+  }
+  database.withTransactionSync(() => {
+    database.runSync('DELETE FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?', [
+      playlistId,
+      trackId,
+    ]);
+    database.runSync('UPDATE playlists SET updated_at = ? WHERE id = ?', [now, playlistId]);
+  });
+}
+
+/**
+ * Réécrit l'ordre complet d'une playlist depuis la liste d'ids fournie (réordonnancement).
+ * On réassigne toutes les positions plutôt que de bricoler des index : simple et robuste, la
+ * lecture se faisant toujours via `ORDER BY position`.
+ */
+export function setPlaylistTrackOrder(playlistId: string, orderedIds: string[], now: number): void {
+  const database = db();
+  if (!database) {
+    return;
+  }
+  database.withTransactionSync(() => {
+    orderedIds.forEach((trackId, index) => {
+      database.runSync(
+        'UPDATE playlist_tracks SET position = ? WHERE playlist_id = ? AND track_id = ?',
+        [index, playlistId, trackId]
+      );
+    });
+    database.runSync('UPDATE playlists SET updated_at = ? WHERE id = ?', [now, playlistId]);
+  });
 }

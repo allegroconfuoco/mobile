@@ -15,21 +15,25 @@ import { colors, spacing, typography } from '@/theme';
 import { Icon, type IconName } from '@/components/Icon';
 import { SegmentedControl, type Segment } from '@/components/SegmentedControl';
 import { TrackActionsSheet } from '@/components/TrackActionsSheet';
+import { PlaylistPickerSheet } from '@/components/PlaylistPickerSheet';
+import { PlaylistNameDialog } from '@/components/PlaylistNameDialog';
 import { TrackCover } from '@/components/TrackCover';
 import { TrackRow } from '@/components/TrackRow';
 import type { LibraryStatus, LocalTrack } from '@/library/useAudioLibrary';
 import type { AlbumGroup, ArtistGroup, TrackSort } from '@/library/grouping';
 import { useLibrary } from '@/library/LibraryProvider';
+import { usePlaylistsContext } from '@/library/PlaylistsProvider';
 import { usePlayer } from '@/player/PlayerProvider';
 import { usePlayback } from '@/player/usePlayback';
 
 /** Vue courante de la bibliothèque. */
-type LibraryView = 'tracks' | 'artists' | 'albums';
+type LibraryView = 'tracks' | 'artists' | 'albums' | 'playlists';
 
 const VIEWS: Segment<LibraryView>[] = [
   { value: 'tracks', label: 'Morceaux' },
   { value: 'artists', label: 'Artistes' },
   { value: 'albums', label: 'Albums' },
+  { value: 'playlists', label: 'Playlists' },
 ];
 
 /** Onglet Bibliothèque : morceaux / artistes / albums de la musique locale. */
@@ -92,6 +96,8 @@ function LibraryContent({ view, library }: { view: LibraryView; library: Library
   const { track: activeTrack } = usePlayback();
   // Piste dont le menu d'actions (long-press) est ouvert, ou `null` si fermé.
   const [menuTrack, setMenuTrack] = useState<LocalTrack | null>(null);
+  // Piste pour laquelle le sélecteur « Ajouter à une playlist » est ouvert, ou `null`.
+  const [pickerTrack, setPickerTrack] = useState<LocalTrack | null>(null);
 
   return (
     <>
@@ -122,13 +128,79 @@ function LibraryContent({ view, library }: { view: LibraryView; library: Library
           }
         />
       )}
+      {view === 'playlists' && <PlaylistsView />}
 
       <TrackActionsSheet
         title={menuTrack?.title ?? null}
         onClose={() => setMenuTrack(null)}
         onPlayNext={() => menuTrack && void playNext([menuTrack])}
         onAddToQueue={() => menuTrack && void addToQueue([menuTrack])}
+        onAddToPlaylist={() => setPickerTrack(menuTrack)}
         onExclude={() => menuTrack && setTrackExcluded(menuTrack.id, true)}
+      />
+
+      <PlaylistPickerSheet track={pickerTrack} onClose={() => setPickerTrack(null)} />
+    </>
+  );
+}
+
+/** Vue Playlists : liste des playlists + création. */
+function PlaylistsView() {
+  const router = useRouter();
+  const { playlists, createPlaylist } = usePlaylistsContext();
+  const [creating, setCreating] = useState(false);
+
+  return (
+    <>
+      <FlatList
+        data={playlists}
+        keyExtractor={(playlist) => playlist.id}
+        ListHeaderComponent={
+          <Pressable
+            onPress={() => setCreating(true)}
+            style={({ pressed }) => [styles.createRow, pressed && styles.rowPressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Nouvelle playlist"
+          >
+            <Icon name="add" size={24} color={colors.accentIcon} />
+            <Text style={styles.createLabel}>Nouvelle playlist</Text>
+          </Pressable>
+        }
+        renderItem={({ item }) => (
+          <Pressable
+            onPress={() => router.push({ pathname: '/playlist', params: { id: item.id } })}
+            style={({ pressed }) => [styles.playlistRow, pressed && styles.rowPressed]}
+            accessibilityRole="button"
+            accessibilityLabel={`Playlist ${item.name}`}
+          >
+            <Icon name="queue_music" size={22} color={colors.textSecondary} />
+            <View style={styles.playlistText}>
+              <Text style={styles.playlistName} numberOfLines={1}>
+                {item.name}
+              </Text>
+              <Text style={styles.playlistMeta} numberOfLines={1}>
+                {countLabel(item.trackCount, 'titre')}
+              </Text>
+            </View>
+            <Icon name="chevron_right" size={22} color={colors.textMuted} />
+          </Pressable>
+        )}
+        ListEmptyComponent={
+          <Text style={styles.playlistsEmpty}>
+            Aucune playlist pour l’instant. Créez-en une, puis ajoutez des morceaux depuis la
+            bibliothèque.
+          </Text>
+        }
+        contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
+      />
+
+      <PlaylistNameDialog
+        visible={creating}
+        title="Nouvelle playlist"
+        submitLabel="Créer"
+        onSubmit={(name) => createPlaylist(name)}
+        onClose={() => setCreating(false)}
       />
     </>
   );
@@ -467,5 +539,42 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textMuted,
     marginTop: 1,
+  },
+  createRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingHorizontal: spacing.xxl,
+    paddingVertical: spacing.lg,
+  },
+  createLabel: {
+    ...typography.heading,
+    color: colors.accentLabel,
+  },
+  playlistRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingHorizontal: spacing.xxl,
+    paddingVertical: spacing.md,
+  },
+  playlistText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  playlistName: {
+    ...typography.heading,
+  },
+  playlistMeta: {
+    ...typography.body,
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  playlistsEmpty: {
+    ...typography.body,
+    textAlign: 'center',
+    paddingHorizontal: spacing.xxl,
+    paddingVertical: spacing.xl,
   },
 });

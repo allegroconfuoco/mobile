@@ -47,7 +47,11 @@ export type IconName =
   | 'close'
   | 'sort'
   | 'person'
-  | 'album';
+  | 'album'
+  | 'delete'
+  | 'edit'
+  | 'playlist_add_check'
+  | 'check';
 
 type IconProps = {
   name: IconName;

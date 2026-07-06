@@ -9,33 +9,45 @@ import {
   View,
 } from 'react-native';
 import { Image } from 'expo-image';
-import type { Track } from 'react-native-track-player';
 
 import { colors, coverFallback, radii, spacing, typography } from '@/theme';
 import { Icon } from '@/components/Icon';
 
 /**
- * Liste de file d'attente réordonnable par glisser-déposer.
+ * Liste de pistes réordonnable par glisser-déposer, sans dépendance native.
  *
- * Implémentation sans dépendance : `Animated` + `PanResponder` du cœur de React Native (pas de
- * reanimated/gesture-handler, non configurés dans le projet — cf. CLAUDE.md sur les deps natives
- * fragiles). Le geste part d'une **poignée** dédiée pour ne pas entrer en conflit avec le tap
- * (qui, lui, saute à la piste) ni avec le défilement.
+ * `Animated` + `PanResponder` du cœur de React Native (pas de reanimated/gesture-handler, non
+ * configurés — cf. CLAUDE.md sur les deps natives fragiles). Le geste part d'une **poignée** dédiée
+ * pour ne pas entrer en conflit avec le tap (qui saute à la piste) ni avec le défilement.
  *
- * Le rendu est à position absolue sur une grille de hauteur fixe (`ROW_HEIGHT`) : la ligne tirée
- * suit le doigt, les autres s'écartent pour ouvrir un emplacement. Au lâcher, on réordonne
- * localement (optimiste) puis on remonte le déplacement au lecteur via `onMove`.
+ * Rendu à position absolue sur une grille de hauteur fixe (`ROW_HEIGHT`) : la ligne tirée suit le
+ * doigt, les autres s'écartent. Au lâcher, on réordonne localement (optimiste) puis on remonte le
+ * déplacement via `onMove`.
+ *
+ * Générique (file d'attente *et* détail de playlist) : les items sont normalisés en
+ * `DraggableTrackItem`, chaque appelant projette son type source (RNTP `Track`, `LocalTrack`…).
  */
 
 const ROW_HEIGHT = 64;
 
-export type DraggableQueueListProps = {
-  tracks: Track[];
+/** Forme minimale attendue par la liste : chaque appelant y projette son type source. */
+export type DraggableTrackItem = {
+  id: string;
+  title: string;
+  artist: string;
+  /** URI de pochette, ou `null` (pastille de repli). */
+  artworkUri: string | null;
+};
+
+export type DraggableTrackListProps = {
+  items: DraggableTrackItem[];
   /** Id de la piste en cours (surlignage) ; robuste aux réordonnancements, contrairement à un index. */
   activeTrackId: string | undefined;
   onPlay: (index: number) => void;
   onRemove: (index: number) => void;
   onMove: (fromIndex: number, toIndex: number) => void;
+  /** Libellé d'accessibilité de l'action « retirer » (ex. « Retirer de la file »). */
+  removeLabel?: string;
   contentPaddingBottom?: number;
 };
 
@@ -50,27 +62,28 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-export function DraggableQueueList({
-  tracks,
+export function DraggableTrackList({
+  items,
   activeTrackId,
   onPlay,
   onRemove,
   onMove,
+  removeLabel = 'Retirer',
   contentPaddingBottom = 0,
-}: DraggableQueueListProps) {
+}: DraggableTrackListProps) {
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const pan = useMemo(() => new Animated.Value(0), []);
 
   // Ordre affiché : source de vérité pendant un glisser (optimiste, posé au lâcher). On le
-  // resynchronise sur `tracks` hors glisser, via le motif React « ajuster l'état pendant le
-  // rendu » (pas d'effet) : ça évite de resauter si un refresh du lecteur arrive en plein geste,
-  // et supprime tout flash entre le lâcher optimiste et la confirmation du lecteur.
-  const [data, setData] = useState<Track[]>(tracks);
-  const [syncedTracks, setSyncedTracks] = useState<Track[]>(tracks);
-  if (tracks !== syncedTracks && draggingIndex === null) {
-    setSyncedTracks(tracks);
-    setData(tracks);
+  // resynchronise sur `items` hors glisser, via le motif React « ajuster l'état pendant le
+  // rendu » (pas d'effet) : ça évite de resauter si un refresh arrive en plein geste, et supprime
+  // tout flash entre le lâcher optimiste et la confirmation.
+  const [data, setData] = useState<DraggableTrackItem[]>(items);
+  const [syncedItems, setSyncedItems] = useState<DraggableTrackItem[]>(items);
+  if (items !== syncedItems && draggingIndex === null) {
+    setSyncedItems(items);
+    setData(items);
   }
 
   const startDrag = (index: number) => {
@@ -102,15 +115,16 @@ export function DraggableQueueList({
       showsVerticalScrollIndicator={false}
       contentContainerStyle={{ height: data.length * ROW_HEIGHT + contentPaddingBottom }}
     >
-      {data.map((track, index) => (
+      {data.map((item, index) => (
         <DraggableRow
-          key={`${track.id ?? 'track'}-${index}`}
-          track={track}
+          key={`${item.id}-${index}`}
+          item={item}
           index={index}
-          isActive={track.id != null && track.id === activeTrackId}
+          isActive={item.id === activeTrackId}
           isDragging={index === draggingIndex}
           offset={rowOffset(index, draggingIndex, hoverIndex)}
           dragTranslate={pan}
+          removeLabel={removeLabel}
           onStartDrag={startDrag}
           onMoveDrag={moveDrag}
           onEndDrag={endDrag}
@@ -137,12 +151,13 @@ function rowOffset(index: number, dragging: number | null, hover: number | null)
 }
 
 type DraggableRowProps = {
-  track: Track;
+  item: DraggableTrackItem;
   index: number;
   isActive: boolean;
   isDragging: boolean;
   offset: number;
   dragTranslate: Animated.Value;
+  removeLabel: string;
   onStartDrag: (index: number) => void;
   onMoveDrag: (index: number, dy: number) => void;
   onEndDrag: (index: number) => void;
@@ -176,10 +191,18 @@ function DraggableRow(props: DraggableRowProps) {
   );
   /* eslint-enable react-hooks/refs */
 
-  const { track, index, isActive, isDragging, offset, dragTranslate, onPlay, onRemove } = props;
-  const title = track.title ?? 'Titre inconnu';
-  const artist = track.artist ?? 'Artiste inconnu';
-  const artwork = typeof track.artwork === 'string' ? track.artwork : null;
+  const {
+    item,
+    index,
+    isActive,
+    isDragging,
+    offset,
+    dragTranslate,
+    removeLabel,
+    onPlay,
+    onRemove,
+  } = props;
+  const { title, artist, artworkUri } = item;
 
   return (
     <Animated.View
@@ -199,7 +222,7 @@ function DraggableRow(props: DraggableRowProps) {
           accessibilityState={isActive ? { selected: true } : {}}
           accessibilityLabel={`Lire ${title}`}
         >
-          <Cover uri={artwork} />
+          <Cover uri={artworkUri} />
           <View style={styles.rowText}>
             <Text style={[styles.rowTitle, isActive && styles.rowTitleActive]} numberOfLines={1}>
               {title}
@@ -215,7 +238,7 @@ function DraggableRow(props: DraggableRowProps) {
           onPress={onRemove}
           hitSlop={8}
           accessibilityRole="button"
-          accessibilityLabel={`Retirer ${title} de la file`}
+          accessibilityLabel={`${removeLabel} ${title}`}
         >
           <Icon name="close" size={20} color={colors.textSecondary} />
         </Pressable>
@@ -304,4 +327,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default DraggableQueueList;
+export default DraggableTrackList;

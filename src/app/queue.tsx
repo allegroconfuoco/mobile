@@ -2,9 +2,11 @@ import { useRouter } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useMemo } from 'react';
+
 import { colors, spacing, typography } from '@/theme';
 import { Icon } from '@/components/Icon';
-import { DraggableQueueList } from '@/components/DraggableQueueList';
+import { DraggableTrackList, type DraggableTrackItem } from '@/components/DraggableTrackList';
 import { usePlayer, useQueue } from '@/player/PlayerProvider';
 import { usePlayback } from '@/player/usePlayback';
 
@@ -24,6 +26,18 @@ export default function QueueScreen() {
 
   const count = tracks.length;
   const subtitle = count === 0 ? 'File vide' : `${count} ${count > 1 ? 'titres' : 'titre'} en file`;
+
+  // Projette les pistes RNTP vers la forme normalisée de la liste réordonnable.
+  const items = useMemo<DraggableTrackItem[]>(
+    () =>
+      tracks.map((t) => ({
+        id: t.id ?? '',
+        title: t.title ?? 'Titre inconnu',
+        artist: t.artist ?? 'Artiste inconnu',
+        artworkUri: typeof t.artwork === 'string' ? t.artwork : null,
+      })),
+    [tracks]
+  );
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + spacing.sm }]}>
@@ -51,12 +65,13 @@ export default function QueueScreen() {
           <Text style={styles.emptyText}>Aucune piste dans la file.</Text>
         </View>
       ) : (
-        <DraggableQueueList
-          tracks={tracks}
+        <DraggableTrackList
+          items={items}
           activeTrackId={activeTrack?.id}
           onPlay={(index) => void skipToIndex(index)}
           onMove={(from, to) => void moveInQueue(from, to)}
           onRemove={(index) => void removeFromQueue(index)}
+          removeLabel="Retirer de la file"
           contentPaddingBottom={insets.bottom + spacing.xxl}
         />
       )}
