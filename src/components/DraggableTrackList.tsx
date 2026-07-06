@@ -37,6 +37,11 @@ export type DraggableTrackItem = {
   artist: string;
   /** URI de pochette, ou `null` (pastille de repli). */
   artworkUri: string | null;
+  /**
+   * Piste indisponible sur cet appareil (référence synchronisée sans fichier local, issue #17) :
+   * ligne grisée, non jouable au tap ; retrait et réordonnancement restent possibles.
+   */
+  unavailable?: boolean;
 };
 
 export type DraggableTrackListProps = {
@@ -203,6 +208,7 @@ function DraggableRow(props: DraggableRowProps) {
     onRemove,
   } = props;
   const { title, artist, artworkUri } = item;
+  const unavailable = item.unavailable ?? false;
 
   return (
     <Animated.View
@@ -216,11 +222,14 @@ function DraggableRow(props: DraggableRowProps) {
     >
       <View style={[styles.row, (isActive || isDragging) && styles.rowRaised]}>
         <Pressable
-          onPress={onPlay}
-          style={styles.rowMain}
+          onPress={unavailable ? undefined : onPlay}
+          disabled={unavailable}
+          style={[styles.rowMain, unavailable && styles.rowMainUnavailable]}
           accessibilityRole="button"
-          accessibilityState={isActive ? { selected: true } : {}}
-          accessibilityLabel={`Lire ${title}`}
+          accessibilityState={{ selected: isActive, disabled: unavailable }}
+          accessibilityLabel={
+            unavailable ? `${title}, indisponible sur cet appareil` : `Lire ${title}`
+          }
         >
           <Cover uri={artworkUri} />
           <View style={styles.rowText}>
@@ -228,10 +237,13 @@ function DraggableRow(props: DraggableRowProps) {
               {title}
             </Text>
             <Text style={styles.rowMeta} numberOfLines={1}>
-              {artist}
+              {unavailable ? `${artist} · indisponible` : artist}
             </Text>
           </View>
-          {isActive && <Icon name="graphic_eq" size={20} color={colors.accentIcon} />}
+          {isActive && !unavailable && (
+            <Icon name="graphic_eq" size={20} color={colors.accentIcon} />
+          )}
+          {unavailable && <Icon name="cloud_off" size={18} color={colors.textMuted} />}
         </Pressable>
 
         <Pressable
@@ -292,6 +304,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.md,
     minWidth: 0,
+  },
+  rowMainUnavailable: {
+    opacity: 0.45,
   },
   cover: {
     width: 40,

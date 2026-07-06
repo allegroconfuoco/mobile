@@ -25,6 +25,8 @@ export type IconName =
   | 'favorite'
   | 'favorite_border'
   | 'cloud_done'
+  | 'cloud_off'
+  | 'sync'
   | 'chevron_right'
   | 'expand_more'
   | 'more_horiz'
@@ -51,7 +53,8 @@ export type IconName =
   | 'delete'
   | 'edit'
   | 'playlist_add_check'
-  | 'check';
+  | 'check'
+  | 'logout';
 
 type IconProps = {
   name: IconName;

@@ -23,11 +23,14 @@ function arrayMove<T>(list: T[], from: number, to: number): T[] {
 }
 
 /**
- * Détail d'une playlist (issue #14) : lecture, réordonnancement, retrait, renommage, suppression.
+ * Détail d'une playlist (issue #14 + synchro #17) : lecture, réordonnancement, retrait, renommage,
+ * suppression.
  *
- * Les pistes sont résolues depuis `tracksById` (toutes les pistes scannées, dossiers exclus
- * compris) dans l'ordre stocké. Une piste dont le fichier a disparu est simplement omise de
- * l'affichage et de la lecture ; sa référence reste en base sans gêner l'ordre des autres.
+ * Chaque entrée est résolue depuis `tracksById` (toutes les pistes scannées, dossiers exclus
+ * compris) via son id partagé → id media-store (cf. `track_registry`). Une piste sans fichier local
+ * — typiquement une référence synchronisée depuis un autre appareil — reste affichée mais **grisée
+ * et non jouable** (« indisponible »), au lieu d'être masquée : la playlist reste cohérente d'un
+ * appareil à l'autre. La file de lecture ne contient que les pistes réellement jouables.
  */
 export default function PlaylistScreen() {
   const insets = useSafeAreaInsets();
@@ -39,7 +42,7 @@ export default function PlaylistScreen() {
   const {
     playlists,
     revision,
-    getTrackIds,
+    getEntries,
     reorderPlaylist,
     removeTrackFromPlaylist,
     renamePlaylist,
@@ -53,32 +56,55 @@ export default function PlaylistScreen() {
   const playlist = playlists.find((p) => p.id === id);
   const name = playlist?.name ?? 'Playlist';
 
-  // Pistes résolues, dans l'ordre de la playlist. `revision` force la relecture après mutation.
-  const localTracks = useMemo<LocalTrack[]>(() => {
-    const ids = getTrackIds(id);
-    const resolved: LocalTrack[] = [];
-    for (const trackId of ids) {
-      const track = tracksById.get(trackId);
-      if (track) {
-        resolved.push(track);
-      }
-    }
-    return resolved;
+  // Entrées de la playlist dans l'ordre, chacune résolue (ou non) vers un fichier local.
+  // `revision` force la relecture après mutation ou après un pull de synchro.
+  const entries = useMemo(() => {
+    return getEntries(id).map((entry) => {
+      const localTrack =
+        entry.localTrackId !== null ? (tracksById.get(entry.localTrackId) ?? null) : null;
+      return { entry, localTrack };
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, getTrackIds, tracksById, revision]);
+  }, [id, getEntries, tracksById, revision]);
+
+  // Pistes réellement jouables (fichier présent), pour la file de lecture.
+  const playableTracks = useMemo<LocalTrack[]>(
+    () => entries.map((e) => e.localTrack).filter((t): t is LocalTrack => t !== null),
+    [entries]
+  );
 
   const items = useMemo<DraggableTrackItem[]>(
     () =>
-      localTracks.map((t) => ({
-        id: t.id,
-        title: t.title,
-        artist: t.artist ?? UNKNOWN_ARTIST,
-        artworkUri: t.artworkUri,
+      entries.map(({ entry, localTrack }) => ({
+        // Clé = id partagé (stable, présent même sans fichier local) → surlignage/DnD cohérents.
+        id: entry.sharedTrackId,
+        title: localTrack?.title ?? entry.title ?? 'Titre inconnu',
+        artist: localTrack?.artist ?? entry.artist ?? UNKNOWN_ARTIST,
+        artworkUri: localTrack?.artworkUri ?? null,
+        unavailable: localTrack === null,
       })),
-    [localTracks]
+    [entries]
   );
 
-  const count = localTracks.length;
+  const count = entries.length;
+  const unavailableCount = count - playableTracks.length;
+
+  // Id partagé de la piste en cours de lecture (le lecteur raisonne en id media-store).
+  const activeSharedId = useMemo(
+    () => entries.find((e) => e.localTrack?.id === activeTrack?.id)?.entry.sharedTrackId,
+    [entries, activeTrack?.id]
+  );
+
+  // Lance la playlist à partir d'une entrée : ignore les indisponibles, démarre la file sur les
+  // pistes jouables au bon index.
+  const playFrom = (index: number) => {
+    const localTrack = entries[index]?.localTrack;
+    if (!localTrack) {
+      return;
+    }
+    const startIndex = playableTracks.findIndex((t) => t.id === localTrack.id);
+    void playQueue(playableTracks, startIndex < 0 ? 0 : startIndex);
+  };
 
   const confirmDelete = () => {
     Alert.alert('Supprimer la playlist', `« ${name} » sera supprimée définitivement.`, [
@@ -124,10 +150,13 @@ export default function PlaylistScreen() {
         </Text>
         <Text style={styles.count}>
           {count} {count > 1 ? 'titres' : 'titre'}
+          {unavailableCount > 0
+            ? ` · ${unavailableCount} indisponible${unavailableCount > 1 ? 's' : ''}`
+            : ''}
         </Text>
-        {count > 0 && (
+        {playableTracks.length > 0 && (
           <Pressable
-            onPress={() => void playQueue(localTracks, 0)}
+            onPress={() => void playQueue(playableTracks, 0)}
             style={({ pressed }) => [styles.playButton, pressed && styles.playButtonPressed]}
             accessibilityRole="button"
             accessibilityLabel="Lire la playlist"
@@ -148,15 +177,15 @@ export default function PlaylistScreen() {
       ) : (
         <DraggableTrackList
           items={items}
-          activeTrackId={activeTrack?.id}
-          onPlay={(index) => void playQueue(localTracks, index)}
+          activeTrackId={activeSharedId}
+          onPlay={playFrom}
           onMove={(from, to) =>
             reorderPlaylist(
               id,
-              arrayMove(localTracks, from, to).map((t) => t.id)
+              arrayMove(entries, from, to).map((e) => e.entry.sharedTrackId)
             )
           }
-          onRemove={(index) => removeTrackFromPlaylist(id, localTracks[index].id)}
+          onRemove={(index) => removeTrackFromPlaylist(id, entries[index].entry.sharedTrackId)}
           removeLabel="Retirer de la playlist"
           contentPaddingBottom={insets.bottom + spacing.xxl}
         />
