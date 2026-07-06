@@ -13,6 +13,7 @@ import { useRouter } from 'expo-router';
 
 import { colors, spacing, typography } from '@/theme';
 import { Icon, type IconName } from '@/components/Icon';
+import { SearchBar } from '@/components/SearchBar';
 import { SegmentedControl, type Segment } from '@/components/SegmentedControl';
 import { TrackActionsSheet } from '@/components/TrackActionsSheet';
 import { PlaylistPickerSheet } from '@/components/PlaylistPickerSheet';
@@ -20,7 +21,15 @@ import { PlaylistNameDialog } from '@/components/PlaylistNameDialog';
 import { TrackCover } from '@/components/TrackCover';
 import { TrackRow } from '@/components/TrackRow';
 import type { LibraryStatus, LocalTrack } from '@/library/useAudioLibrary';
-import type { AlbumGroup, ArtistGroup, TrackSort } from '@/library/grouping';
+import {
+  filterAlbums,
+  filterArtists,
+  filterTracks,
+  normalizeForSearch,
+  type AlbumGroup,
+  type ArtistGroup,
+  type TrackSort,
+} from '@/library/grouping';
 import { useLibrary } from '@/library/LibraryProvider';
 import { usePlaylistsContext } from '@/library/PlaylistsProvider';
 import { usePlayer } from '@/player/PlayerProvider';
@@ -36,12 +45,21 @@ const VIEWS: Segment<LibraryView>[] = [
   { value: 'playlists', label: 'Playlists' },
 ];
 
+/** Placeholder de recherche selon la vue. */
+const SEARCH_PLACEHOLDER: Record<LibraryView, string> = {
+  tracks: 'Titre, artiste, album',
+  artists: 'Rechercher un artiste',
+  albums: 'Rechercher un album',
+  playlists: 'Rechercher une playlist',
+};
+
 /** Onglet Bibliothèque : morceaux / artistes / albums de la musique locale. */
 export default function LibraryScreen() {
   const insets = useSafeAreaInsets();
   const library = useLibrary();
   const { status, tracks, refreshing, error, rescan } = library;
   const [view, setView] = useState<LibraryView>('tracks');
+  const [query, setQuery] = useState('');
 
   const subtitle = useMemo(() => {
     if (refreshing) {
@@ -77,8 +95,12 @@ export default function LibraryScreen() {
 
       {hasContent && <SegmentedControl segments={VIEWS} value={view} onChange={setView} />}
 
+      {hasContent && (
+        <SearchBar value={query} onChangeText={setQuery} placeholder={SEARCH_PLACEHOLDER[view]} />
+      )}
+
       {hasContent ? (
-        <LibraryContent view={view} library={library} />
+        <LibraryContent view={view} query={query} library={library} />
       ) : (
         <LibraryPlaceholder status={status} error={error} library={library} />
       )}
@@ -89,7 +111,15 @@ export default function LibraryScreen() {
 type LibraryContextValue = ReturnType<typeof useLibrary>;
 
 /** Contenu selon la vue active (bibliothèque prête et non vide). */
-function LibraryContent({ view, library }: { view: LibraryView; library: LibraryContextValue }) {
+function LibraryContent({
+  view,
+  query,
+  library,
+}: {
+  view: LibraryView;
+  query: string;
+  library: LibraryContextValue;
+}) {
   const { tracks, artists, albums, trackSort, setTrackSort, setTrackExcluded } = library;
   const router = useRouter();
   const { playQueue, playNext, addToQueue } = usePlayer();
@@ -99,27 +129,36 @@ function LibraryContent({ view, library }: { view: LibraryView; library: Library
   // Piste pour laquelle le sélecteur « Ajouter à une playlist » est ouvert, ou `null`.
   const [pickerTrack, setPickerTrack] = useState<LocalTrack | null>(null);
 
+  // Résultats filtrés par la recherche (temps réel). Requête vide = listes complètes.
+  const filteredTracks = useMemo(() => filterTracks(tracks, query), [tracks, query]);
+  const filteredArtists = useMemo(() => filterArtists(artists, query), [artists, query]);
+  const filteredAlbums = useMemo(() => filterAlbums(albums, query), [albums, query]);
+
   return (
     <>
       {view === 'tracks' && (
         <TracksView
-          tracks={tracks}
+          tracks={filteredTracks}
+          query={query}
           activeId={activeTrack?.id}
           sort={trackSort}
           onToggleSort={() => setTrackSort(trackSort === 'title' ? 'artist' : 'title')}
-          onPlay={(index) => void playQueue(tracks, index)}
+          // La file de lecture reprend exactement la liste filtrée affichée.
+          onPlay={(index) => void playQueue(filteredTracks, index)}
           onLongPress={setMenuTrack}
         />
       )}
       {view === 'artists' && (
         <ArtistsView
-          artists={artists}
+          artists={filteredArtists}
+          query={query}
           onOpen={(name) => router.push({ pathname: '/artist', params: { name } })}
         />
       )}
       {view === 'albums' && (
         <AlbumsView
-          albums={albums}
+          albums={filteredAlbums}
+          query={query}
           onOpen={(album) =>
             router.push({
               pathname: '/album',
@@ -128,7 +167,7 @@ function LibraryContent({ view, library }: { view: LibraryView; library: Library
           }
         />
       )}
-      {view === 'playlists' && <PlaylistsView />}
+      {view === 'playlists' && <PlaylistsView query={query} />}
 
       <TrackActionsSheet
         title={menuTrack?.title ?? null}
@@ -144,27 +183,40 @@ function LibraryContent({ view, library }: { view: LibraryView; library: Library
   );
 }
 
-/** Vue Playlists : liste des playlists + création. */
-function PlaylistsView() {
+/** Vue Playlists : liste des playlists (filtrable par nom) + création. */
+function PlaylistsView({ query }: { query: string }) {
   const router = useRouter();
   const { playlists, createPlaylist } = usePlaylistsContext();
   const [creating, setCreating] = useState(false);
 
+  // Filtre sur le nom (même repli d'accents que le reste de la recherche).
+  const isSearching = normalizeForSearch(query).length > 0;
+  const filtered = useMemo(() => {
+    const needle = normalizeForSearch(query);
+    if (!needle) {
+      return playlists;
+    }
+    return playlists.filter((p) => normalizeForSearch(p.name).includes(needle));
+  }, [playlists, query]);
+
   return (
     <>
       <FlatList
-        data={playlists}
+        data={filtered}
         keyExtractor={(playlist) => playlist.id}
+        // Pendant une recherche, on masque la ligne de création pour ne montrer que les résultats.
         ListHeaderComponent={
-          <Pressable
-            onPress={() => setCreating(true)}
-            style={({ pressed }) => [styles.createRow, pressed && styles.rowPressed]}
-            accessibilityRole="button"
-            accessibilityLabel="Nouvelle playlist"
-          >
-            <Icon name="add" size={24} color={colors.accentIcon} />
-            <Text style={styles.createLabel}>Nouvelle playlist</Text>
-          </Pressable>
+          isSearching ? null : (
+            <Pressable
+              onPress={() => setCreating(true)}
+              style={({ pressed }) => [styles.createRow, pressed && styles.rowPressed]}
+              accessibilityRole="button"
+              accessibilityLabel="Nouvelle playlist"
+            >
+              <Icon name="add" size={24} color={colors.accentIcon} />
+              <Text style={styles.createLabel}>Nouvelle playlist</Text>
+            </Pressable>
+          )
         }
         renderItem={({ item }) => (
           <Pressable
@@ -186,10 +238,14 @@ function PlaylistsView() {
           </Pressable>
         )}
         ListEmptyComponent={
-          <Text style={styles.playlistsEmpty}>
-            Aucune playlist pour l’instant. Créez-en une, puis ajoutez des morceaux depuis la
-            bibliothèque.
-          </Text>
+          isSearching ? (
+            <NoResults query={query} />
+          ) : (
+            <Text style={styles.playlistsEmpty}>
+              Aucune playlist pour l’instant. Créez-en une, puis ajoutez des morceaux depuis la
+              bibliothèque.
+            </Text>
+          )
         }
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
@@ -209,6 +265,7 @@ function PlaylistsView() {
 /** Vue Morceaux : barre de tri + liste virtualisée. */
 function TracksView({
   tracks,
+  query,
   activeId,
   sort,
   onToggleSort,
@@ -216,6 +273,7 @@ function TracksView({
   onLongPress,
 }: {
   tracks: LocalTrack[];
+  query: string;
   activeId: string | undefined;
   sort: TrackSort;
   onToggleSort: () => void;
@@ -226,7 +284,10 @@ function TracksView({
     <FlatList
       data={tracks}
       keyExtractor={(track) => track.id}
-      ListHeaderComponent={<SortBar sort={sort} onToggle={onToggleSort} />}
+      // On masque la barre de tri quand une recherche ne renvoie rien (seul le message reste).
+      ListHeaderComponent={
+        query && tracks.length === 0 ? null : <SortBar sort={sort} onToggle={onToggleSort} />
+      }
       renderItem={({ item, index }) => (
         <TrackRow
           track={item}
@@ -235,6 +296,7 @@ function TracksView({
           onLongPress={() => onLongPress(item)}
         />
       )}
+      ListEmptyComponent={query ? <NoResults query={query} /> : null}
       contentContainerStyle={styles.listContent}
       showsVerticalScrollIndicator={false}
     />
@@ -262,15 +324,18 @@ function SortBar({ sort, onToggle }: { sort: TrackSort; onToggle: () => void }) 
 /** Vue Artistes : liste des artistes agrégés. */
 function ArtistsView({
   artists,
+  query,
   onOpen,
 }: {
   artists: ArtistGroup[];
+  query: string;
   onOpen: (name: string) => void;
 }) {
   return (
     <FlatList
       data={artists}
       keyExtractor={(artist) => artist.name}
+      ListEmptyComponent={query ? <NoResults query={query} /> : null}
       renderItem={({ item }) => (
         <Pressable
           onPress={() => onOpen(item.name)}
@@ -299,9 +364,11 @@ function ArtistsView({
 /** Vue Albums : grille de pochettes. */
 function AlbumsView({
   albums,
+  query,
   onOpen,
 }: {
   albums: AlbumGroup[];
+  query: string;
   onOpen: (album: AlbumGroup) => void;
 }) {
   return (
@@ -310,6 +377,7 @@ function AlbumsView({
       keyExtractor={(album) => album.key}
       numColumns={2}
       columnWrapperStyle={styles.albumRow}
+      ListEmptyComponent={query ? <NoResults query={query} /> : null}
       renderItem={({ item }) => (
         <Pressable
           onPress={() => onOpen(item)}
@@ -406,6 +474,15 @@ function countLabel(count: number, noun: string): string {
   return `${count} ${noun}${count > 1 ? 's' : ''}`;
 }
 
+/** Message affiché quand une recherche ne renvoie aucun résultat dans la vue courante. */
+function NoResults({ query }: { query: string }) {
+  return (
+    <View style={styles.noResults}>
+      <Text style={styles.noResultsText}>Aucun résultat pour « {query.trim()} »</Text>
+    </View>
+  );
+}
+
 type StateMessageProps = {
   icon: IconName;
   text: string;
@@ -476,6 +553,14 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingBottom: spacing.xxl,
+  },
+  noResults: {
+    paddingHorizontal: spacing.xxl,
+    paddingVertical: spacing.xl,
+  },
+  noResultsText: {
+    ...typography.body,
+    textAlign: 'center',
   },
   rowPressed: {
     backgroundColor: colors.surface,

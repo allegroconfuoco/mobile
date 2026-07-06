@@ -179,6 +179,114 @@ export function orderArtistTracks(tracks: LocalTrack[]): LocalTrack[] {
   return [...tracks].sort((a, b) => compare(albumOf(a), albumOf(b)) || byDiscThenTrack(a, b));
 }
 
+/**
+ * Recherche (issue #15) — filtrage texte insensible à la casse et aux accents.
+ *
+ * On replie les diacritiques pour que « riviere » trouve « Rivière ». Hermes récent
+ * implémente `String.prototype.normalize`, mais on teste la présence une fois au chargement
+ * et on retombe sur une petite table FR si l'appareil ne la supporte pas (dégradation propre :
+ * les caractères non couverts restent comparés en minuscules).
+ */
+const SUPPORTS_NORMALIZE = (() => {
+  try {
+    return 'é'.normalize('NFC') === 'é';
+  } catch {
+    return false;
+  }
+})();
+
+/** Repli sans `normalize` : diacritiques français + latin courant. */
+const FOLD: Record<string, string> = {
+  à: 'a',
+  â: 'a',
+  ä: 'a',
+  á: 'a',
+  ã: 'a',
+  ç: 'c',
+  é: 'e',
+  è: 'e',
+  ê: 'e',
+  ë: 'e',
+  î: 'i',
+  ï: 'i',
+  í: 'i',
+  ì: 'i',
+  ô: 'o',
+  ö: 'o',
+  ó: 'o',
+  ò: 'o',
+  õ: 'o',
+  ù: 'u',
+  û: 'u',
+  ü: 'u',
+  ú: 'u',
+  ñ: 'n',
+  œ: 'oe',
+  æ: 'ae',
+  ß: 'ss',
+};
+
+/** Minuscule + sans accent, pour comparer requête et champs sur un même pied. */
+export function normalizeForSearch(value: string): string {
+  const lower = value.toLowerCase();
+  if (SUPPORTS_NORMALIZE) {
+    // NFD détache les diacritiques (U+0300–U+036F) ; on les retire ensuite. Filtrage par
+    // point de code plutôt que par regex pour garder une source 100 % ASCII.
+    let out = '';
+    for (const ch of lower.normalize('NFD')) {
+      const code = ch.charCodeAt(0);
+      if (code < 0x0300 || code > 0x036f) {
+        out += ch;
+      }
+    }
+    return out.trim();
+  }
+  let out = '';
+  for (const ch of lower) {
+    out += FOLD[ch] ?? ch;
+  }
+  return out.trim();
+}
+
+/** Une piste correspond si le terme est présent dans son titre, artiste ou album. */
+function matchesTrack(track: LocalTrack, needle: string): boolean {
+  return (
+    normalizeForSearch(track.title).includes(needle) ||
+    normalizeForSearch(artistOf(track)).includes(needle) ||
+    normalizeForSearch(albumOf(track)).includes(needle)
+  );
+}
+
+/** Filtre les pistes sur titre / artiste / album. Requête vide = liste inchangée. */
+export function filterTracks(tracks: LocalTrack[], query: string): LocalTrack[] {
+  const needle = normalizeForSearch(query);
+  if (!needle) {
+    return tracks;
+  }
+  return tracks.filter((t) => matchesTrack(t, needle));
+}
+
+/** Filtre les artistes agrégés sur leur nom. Requête vide = liste inchangée. */
+export function filterArtists(artists: ArtistGroup[], query: string): ArtistGroup[] {
+  const needle = normalizeForSearch(query);
+  if (!needle) {
+    return artists;
+  }
+  return artists.filter((a) => normalizeForSearch(a.name).includes(needle));
+}
+
+/** Filtre les albums agrégés sur leur titre ou leur artiste. Requête vide = liste inchangée. */
+export function filterAlbums(albums: AlbumGroup[], query: string): AlbumGroup[] {
+  const needle = normalizeForSearch(query);
+  if (!needle) {
+    return albums;
+  }
+  return albums.filter(
+    (a) =>
+      normalizeForSearch(a.title).includes(needle) || normalizeForSearch(a.artist).includes(needle)
+  );
+}
+
 /** Critère de tri de la liste des morceaux. */
 export type TrackSort = 'title' | 'artist';
 
