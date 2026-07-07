@@ -32,6 +32,7 @@ import {
 } from '@/library/grouping';
 import { useLibrary } from '@/library/LibraryProvider';
 import { usePlaylistsContext } from '@/library/PlaylistsProvider';
+import { useFavorites } from '@/library/FavoritesProvider';
 import { usePlayer } from '@/player/PlayerProvider';
 import { usePlayback } from '@/player/usePlayback';
 
@@ -123,6 +124,7 @@ function LibraryContent({
   const { tracks, artists, albums, trackSort, setTrackSort, setTrackExcluded } = library;
   const router = useRouter();
   const { playQueue, playNext, addToQueue } = usePlayer();
+  const { isFavorite, toggleFavorite } = useFavorites();
   const { track: activeTrack } = usePlayback();
   // Piste dont le menu d'actions (long-press) est ouvert, ou `null` si fermé.
   const [menuTrack, setMenuTrack] = useState<LocalTrack | null>(null);
@@ -171,9 +173,11 @@ function LibraryContent({
 
       <TrackActionsSheet
         title={menuTrack?.title ?? null}
+        isFavorite={menuTrack ? isFavorite(menuTrack.id) : false}
         onClose={() => setMenuTrack(null)}
         onPlayNext={() => menuTrack && void playNext([menuTrack])}
         onAddToQueue={() => menuTrack && void addToQueue([menuTrack])}
+        onToggleFavorite={() => menuTrack && toggleFavorite(menuTrack.id, menuTrack.mbid)}
         onAddToPlaylist={() => setPickerTrack(menuTrack)}
         onFixMetadata={() =>
           menuTrack && router.push({ pathname: '/metadata-fix', params: { trackId: menuTrack.id } })
@@ -186,10 +190,11 @@ function LibraryContent({
   );
 }
 
-/** Vue Playlists : liste des playlists (filtrable par nom) + création. */
+/** Vue Playlists : accès Favoris + liste des playlists (filtrable par nom) + création. */
 function PlaylistsView({ query }: { query: string }) {
   const router = useRouter();
   const { playlists, createPlaylist } = usePlaylistsContext();
+  const { favoriteIds } = useFavorites();
   const [creating, setCreating] = useState(false);
 
   // Filtre sur le nom (même repli d'accents que le reste de la recherche).
@@ -207,18 +212,37 @@ function PlaylistsView({ query }: { query: string }) {
       <FlatList
         data={filtered}
         keyExtractor={(playlist) => playlist.id}
-        // Pendant une recherche, on masque la ligne de création pour ne montrer que les résultats.
+        // Pendant une recherche, on masque Favoris + création pour ne montrer que les résultats.
         ListHeaderComponent={
           isSearching ? null : (
-            <Pressable
-              onPress={() => setCreating(true)}
-              style={({ pressed }) => [styles.createRow, pressed && styles.rowPressed]}
-              accessibilityRole="button"
-              accessibilityLabel="Nouvelle playlist"
-            >
-              <Icon name="add" size={24} color={colors.accentIcon} />
-              <Text style={styles.createLabel}>Nouvelle playlist</Text>
-            </Pressable>
+            <>
+              <Pressable
+                onPress={() => router.push('/favorites')}
+                style={({ pressed }) => [styles.playlistRow, pressed && styles.rowPressed]}
+                accessibilityRole="button"
+                accessibilityLabel="Favoris"
+              >
+                <Icon name="favorite" filled size={22} color={colors.accent} />
+                <View style={styles.playlistText}>
+                  <Text style={styles.playlistName} numberOfLines={1}>
+                    Favoris
+                  </Text>
+                  <Text style={styles.playlistMeta} numberOfLines={1}>
+                    {countLabel(favoriteIds.size, 'titre')}
+                  </Text>
+                </View>
+                <Icon name="chevron_right" size={22} color={colors.textMuted} />
+              </Pressable>
+              <Pressable
+                onPress={() => setCreating(true)}
+                style={({ pressed }) => [styles.createRow, pressed && styles.rowPressed]}
+                accessibilityRole="button"
+                accessibilityLabel="Nouvelle playlist"
+              >
+                <Icon name="add" size={24} color={colors.accentIcon} />
+                <Text style={styles.createLabel}>Nouvelle playlist</Text>
+              </Pressable>
+            </>
           )
         }
         renderItem={({ item }) => (
@@ -346,7 +370,7 @@ function ArtistsView({
           accessibilityRole="button"
           accessibilityLabel={`Artiste ${item.name}`}
         >
-          <TrackCover uri={item.artworkUri} fallbackIcon="person" />
+          <TrackCover uri={item.artworkUri} fallbackIcon="person" seed={item.name} />
           <View style={styles.artistText}>
             <Text style={styles.artistName} numberOfLines={1}>
               {item.name}
@@ -388,7 +412,12 @@ function AlbumsView({
           accessibilityRole="button"
           accessibilityLabel={`Album ${item.title}, ${item.artist}`}
         >
-          <TrackCover uri={item.artworkUri} fill fallbackIcon="album" />
+          <TrackCover
+            uri={item.artworkUri}
+            fill
+            fallbackIcon="album"
+            seed={`${item.title}${item.artist}`}
+          />
           <Text style={styles.albumTitle} numberOfLines={1}>
             {item.title}
           </Text>

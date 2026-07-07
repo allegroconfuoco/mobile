@@ -1,9 +1,5 @@
 import { Platform } from 'react-native';
-import TrackPlayer, {
-  AppKilledPlaybackBehavior,
-  Capability,
-  RepeatMode,
-} from 'react-native-track-player';
+import TrackPlayer, { AppKilledPlaybackBehavior, Capability } from 'react-native-track-player';
 
 /**
  * Initialisation du lecteur.
@@ -65,7 +61,8 @@ async function runSetup(): Promise<boolean> {
     ],
     progressUpdateEventInterval: 1,
   });
-  await TrackPlayer.setRepeatMode(RepeatMode.Queue);
+  // Le mode de répétition n'est plus figé ici : `PlayerProvider` l'applique depuis les préférences
+  // (finition Phase 1) une fois le lecteur prêt.
 
   return true;
 }

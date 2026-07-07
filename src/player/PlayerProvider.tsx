@@ -8,11 +8,45 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import TrackPlayer, { Event, State, type Track } from 'react-native-track-player';
+import TrackPlayer, { Event, RepeatMode, State, type Track } from 'react-native-track-player';
 
 import { type LocalTrack } from '@/library/useAudioLibrary';
+import * as db from '@/library/db';
 import { ensurePlayerReady } from './setup';
 import { resolvePlayerTracks } from './track';
+import { planMoves, restoreOrder, shuffleAfter } from './shuffle';
+
+/** Correspondance `RepeatMode` ↔ valeur persistée (`app_settings`). */
+function repeatFromSetting(value: string | null): RepeatMode {
+  if (value === 'queue') {
+    return RepeatMode.Queue;
+  }
+  if (value === 'track') {
+    return RepeatMode.Track;
+  }
+  return RepeatMode.Off;
+}
+
+function repeatToSetting(mode: RepeatMode): string {
+  if (mode === RepeatMode.Queue) {
+    return 'queue';
+  }
+  if (mode === RepeatMode.Track) {
+    return 'track';
+  }
+  return 'off';
+}
+
+/** Cycle des modes de répétition : Off → File → Piste → Off. */
+function nextRepeat(mode: RepeatMode): RepeatMode {
+  if (mode === RepeatMode.Off) {
+    return RepeatMode.Queue;
+  }
+  if (mode === RepeatMode.Queue) {
+    return RepeatMode.Track;
+  }
+  return RepeatMode.Off;
+}
 
 /** Commandes de lecture exposées à l'UI. L'état réactif, lui, passe par `usePlayback`. */
 export type PlayerActions = {
@@ -50,8 +84,23 @@ export type QueueState = {
   activeIndex: number | undefined;
 };
 
+/** Mode de lecture : répétition + lecture aléatoire (finition Phase 1). */
+export type PlaybackMode = {
+  /** Mode de répétition courant (Off / File / Piste). */
+  repeatMode: RepeatMode;
+  /** La lecture aléatoire est-elle active ? */
+  shuffle: boolean;
+  /** Passe au mode de répétition suivant (Off → File → Piste → Off) et le persiste. */
+  cycleRepeat: () => void;
+  /** Fixe directement le mode de répétition (écran Réglages) et le persiste. */
+  setRepeat: (mode: RepeatMode) => void;
+  /** Active/désactive la lecture aléatoire (réordonne la file en conséquence) et la persiste. */
+  toggleShuffle: () => void;
+};
+
 const PlayerContext = createContext<(PlayerActions & QueueActions) | null>(null);
 const QueueContext = createContext<QueueState | null>(null);
+const PlaybackModeContext = createContext<PlaybackMode | null>(null);
 
 /**
  * Monte le lecteur et fournit ses commandes à l'arbre.
@@ -65,6 +114,16 @@ const QueueContext = createContext<QueueState | null>(null);
  */
 export function PlayerProvider({ children }: { children: ReactNode }) {
   const [queue, setQueue] = useState<QueueState>({ tracks: [], activeIndex: undefined });
+
+  // Mode de lecture (finition Phase 1). État réactif pour l'UI + refs lues hors rendu dans les
+  // handlers (évite les closures périmées). Valeurs initiales relues depuis les préférences.
+  const [repeatMode, setRepeatMode] = useState<RepeatMode>(() =>
+    repeatFromSetting(db.getSetting('playback.repeat'))
+  );
+  const [shuffle, setShuffle] = useState<boolean>(() => db.getSetting('playback.shuffle') === '1');
+  const shuffleRef = useRef(shuffle);
+  // Ordre de la file avant activation du shuffle, pour pouvoir le restaurer à la désactivation.
+  const originalOrderRef = useRef<string[] | null>(null);
 
   // Sérialise les opérations qui touchent à la file. Les mutations rapides (déplacements
   // successifs) s'enchaînent alors strictement, sans s'entrelacer : chaque `refreshQueue` lit
@@ -113,6 +172,24 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     return () => sub.remove();
   }, [enqueue, refreshQueue]);
 
+  // Applique le mode de répétition persisté une fois le lecteur prêt (le défaut RNTP est `Off`).
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      if (!(await ensurePlayerReady())) {
+        return;
+      }
+      const mode = repeatFromSetting(db.getSetting('playback.repeat'));
+      await TrackPlayer.setRepeatMode(mode);
+      if (!cancelled) {
+        setRepeatMode(mode);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const playQueue = useCallback(
     (tracks: LocalTrack[], startIndex: number) =>
       enqueue(async () => {
@@ -129,7 +206,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           resolved.findIndex((track) => track.id === targetId)
         );
 
-        await TrackPlayer.setQueue(resolved);
+        // Ordre final calculé AVANT de charger la file. En shuffle, on mélange la suite du titre
+        // tapé (gardé en place par `shuffleAfter`, donc toujours à `resumeIndex`), puis on charge
+        // la file déjà mélangée. On ne réordonne JAMAIS après `skip`/`play` : enchaîner des `move`
+        // sur une file en cours de transition (ExoPlayer encore en buffering) faisait dériver la
+        // piste réellement lue vers un titre aléatoire de la file mélangée.
+        let finalTracks = resolved;
+        if (shuffleRef.current) {
+          const ids = resolved.map((t) => String(t.id));
+          originalOrderRef.current = ids;
+          const byId = new Map(resolved.map((t) => [String(t.id), t]));
+          finalTracks = shuffleAfter(ids, resumeIndex)
+            .map((id) => byId.get(id))
+            .filter((track): track is Track => track !== undefined);
+        }
+
+        await TrackPlayer.setQueue(finalTracks);
         await TrackPlayer.skip(resumeIndex);
         await TrackPlayer.play();
         await refreshQueue();
@@ -152,6 +244,63 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const skipToNext = useCallback(() => void TrackPlayer.skipToNext().catch(() => {}), []);
   const skipToPrevious = useCallback(() => void TrackPlayer.skipToPrevious().catch(() => {}), []);
   const seekTo = useCallback((seconds: number) => void TrackPlayer.seekTo(seconds), []);
+
+  const cycleRepeat = useCallback(() => {
+    setRepeatMode((prev) => {
+      const next = nextRepeat(prev);
+      db.setSetting('playback.repeat', repeatToSetting(next));
+      void ensurePlayerReady().then((ok) => {
+        if (ok) {
+          void TrackPlayer.setRepeatMode(next);
+        }
+      });
+      return next;
+    });
+  }, []);
+
+  const setRepeat = useCallback((mode: RepeatMode) => {
+    setRepeatMode(mode);
+    db.setSetting('playback.repeat', repeatToSetting(mode));
+    void ensurePlayerReady().then((ok) => {
+      if (ok) {
+        void TrackPlayer.setRepeatMode(mode);
+      }
+    });
+  }, []);
+
+  const toggleShuffle = useCallback(() => {
+    const next = !shuffleRef.current;
+    shuffleRef.current = next;
+    setShuffle(next);
+    db.setSetting('playback.shuffle', next ? '1' : '0');
+    void enqueue(async () => {
+      if (!(await ensurePlayerReady())) {
+        return;
+      }
+      const [tracks, activeIndexRaw] = await Promise.all([
+        TrackPlayer.getQueue(),
+        TrackPlayer.getActiveTrackIndex(),
+      ]);
+      const currentIds = tracks.map((t) => String(t.id));
+      if (currentIds.length === 0) {
+        return;
+      }
+      const activeIndex = activeIndexRaw ?? -1;
+      let target: string[];
+      if (next) {
+        // Activation : on garde l'ordre courant comme référence, puis on mélange la suite.
+        originalOrderRef.current = currentIds;
+        target = shuffleAfter(currentIds, activeIndex);
+      } else {
+        // Désactivation : on restaure l'ordre d'origine (ids disparus ignorés, ajoutés en fin).
+        target = restoreOrder(currentIds, originalOrderRef.current ?? currentIds);
+      }
+      for (const [from, to] of planMoves(currentIds, target)) {
+        await TrackPlayer.move(from, to);
+      }
+      await refreshQueue();
+    });
+  }, [enqueue, refreshQueue]);
 
   const addToQueue = useCallback(
     (tracks: LocalTrack[]) =>
@@ -252,9 +401,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     ]
   );
 
+  const mode = useMemo<PlaybackMode>(
+    () => ({ repeatMode, shuffle, cycleRepeat, setRepeat, toggleShuffle }),
+    [repeatMode, shuffle, cycleRepeat, setRepeat, toggleShuffle]
+  );
+
   return (
     <PlayerContext.Provider value={actions}>
-      <QueueContext.Provider value={queue}>{children}</QueueContext.Provider>
+      <PlaybackModeContext.Provider value={mode}>
+        <QueueContext.Provider value={queue}>{children}</QueueContext.Provider>
+      </PlaybackModeContext.Provider>
     </PlayerContext.Provider>
   );
 }
@@ -275,4 +431,13 @@ export function useQueue(): QueueState {
     throw new Error('useQueue doit être utilisé dans un <PlayerProvider>.');
   }
   return queue;
+}
+
+/** Mode de lecture (répétition + shuffle). À utiliser sous `PlayerProvider`. */
+export function usePlaybackMode(): PlaybackMode {
+  const mode = useContext(PlaybackModeContext);
+  if (!mode) {
+    throw new Error('usePlaybackMode doit être utilisé dans un <PlayerProvider>.');
+  }
+  return mode;
 }

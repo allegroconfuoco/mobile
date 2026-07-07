@@ -39,11 +39,34 @@ export const colors = {
 } as const;
 
 /**
- * Dégradé de pochette par défaut (placeholder quand pas d'artwork).
- * react-native ne gère pas les gradients CSS : à utiliser avec expo-linear-gradient
- * le jour venu. En attendant, `coverFallback` sert de couleur pleine.
+ * Couleur pleine de repli (placeholder quand pas d'artwork). Conservée comme repli si le dégradé
+ * (`coverGradient`, via expo-linear-gradient) n'est pas rendu.
  */
 export const coverFallback = '#E0381A';
+
+/**
+ * Paires de dégradés « braise » pour les pochettes de repli. Toutes restent dans la palette Forge :
+ * une pochette sans artwork garde ainsi l'identité visuelle plutôt qu'un aplat unique.
+ */
+export const coverGradients: readonly (readonly [string, string])[] = [
+  ['#FF7A45', '#B3260D'],
+  ['#FF5A1F', '#7A1E0A'],
+  ['#F0921F', '#B3260D'],
+  ['#E0381A', '#4A0E06'],
+  ['#FF6A2B', '#8A1B0C'],
+] as const;
+
+/**
+ * Dégradé déterministe pour une pochette de repli, choisi par un hash de `seed` (titre + artiste) :
+ * la même piste garde toujours le même dégradé, deux pistes voisines en ont de différents.
+ */
+export function coverGradient(seed: string): readonly [string, string] {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash * 31 + seed.charCodeAt(i)) | 0;
+  }
+  return coverGradients[Math.abs(hash) % coverGradients.length];
+}
 
 /** Échelle d'espacement (px). */
 export const spacing = {
@@ -75,6 +98,15 @@ export const fontFamily = {
   extrabold: 'SchibstedGrotesk_800ExtraBold',
   /** Police d'icônes (ligatures : « home », « search », « settings »…). */
   icons: 'MaterialSymbols_400Regular',
+  /**
+   * Variante « pleine » (FILL=1) des icônes Material Symbols. La police statique par défaut
+   * est FILL=0 (contour uniquement) : `favorite` et `favorite_border` y pointent sur le MÊME
+   * glyphe contour, donc un cœur ne peut jamais paraître plein. Cette police (instance FILL=1
+   * du variable font Outlined, sous-ensemblée au seul `favorite`, cf. assets/fonts) fournit le
+   * glyphe rempli. À n'utiliser que via `<Icon filled />` pour les icônes réellement disponibles
+   * ici (aujourd'hui : `favorite`). Ajouter d'autres icônes pleines = régénérer la police.
+   */
+  iconsFilled: 'MaterialSymbolsFilled',
 } as const;
 
 /**

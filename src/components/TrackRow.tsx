@@ -65,7 +65,10 @@ export function TrackRow({
           )}
         </View>
       ) : (
-        <TrackCover uri={track.artworkUri ?? track.coverArtUrl} />
+        <TrackCover
+          uri={track.artworkUri ?? track.coverArtUrl}
+          seed={`${track.title}${track.artist ?? ''}`}
+        />
       )}
       <View style={styles.text}>
         <Text style={[styles.title, isActive && styles.titleActive]} numberOfLines={1}>

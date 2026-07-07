@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
@@ -49,6 +59,11 @@ export default function IdentifyAlbumScreen() {
   // Album déjà identifié ? (au moins un overlay release sur ses pistes) → propose la réinitialisation.
   const alreadyIdentified = useMemo(() => db.countReleaseOverlays(trackIds) > 0, [trackIds]);
 
+  // Termes de recherche éditables (préremplis depuis les tags) : les tags d'un album peuvent être
+  // approximatifs, l'utilisateur doit pouvoir rectifier et relancer.
+  const [albumInput, setAlbumInput] = useState(title);
+  const [artistInput, setArtistInput] = useState(artist);
+
   const [candidates, setCandidates] = useState<ReleaseCandidate[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,6 +74,13 @@ export default function IdentifyAlbumScreen() {
   const [busy, setBusy] = useState(false);
 
   const loadCandidates = useCallback(async () => {
+    const album = albumInput.trim();
+    const albumArtist = artistInput.trim();
+    if (!album && !albumArtist) {
+      setError('Renseigne au moins un album ou un artiste.');
+      setCandidates(null);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -67,9 +89,11 @@ export default function IdentifyAlbumScreen() {
         setError('Session expirée : reconnecte-toi pour identifier l’album.');
         return;
       }
+      // Le compte/les titres locaux affinent la recherche (le backend tente le compte exact puis
+      // relâche) sans dépendre des termes édités, qui ne changent que la requête, pas l'album ciblé.
       const found = await fetchAlbumCandidates(token, {
-        albumArtist: artist,
-        album: title,
+        albumArtist,
+        album,
         trackCount: albumTracks.length,
         trackTitles: albumTracks.map((t) => t.title),
       });
@@ -79,7 +103,7 @@ export default function IdentifyAlbumScreen() {
     } finally {
       setLoading(false);
     }
-  }, [getAccessToken, artist, title, albumTracks]);
+  }, [albumInput, artistInput, getAccessToken, albumTracks]);
 
   // Recherche automatique au montage (l'utilisateur a déjà exprimé son intention en ouvrant l'écran).
   const started = useRef(false);
@@ -176,159 +200,193 @@ export default function IdentifyAlbumScreen() {
         </Text>
       </View>
 
-      <ScrollView
-        contentContainerStyle={{ paddingBottom: insets.bottom + spacing.xxl }}
-        showsVerticalScrollIndicator={false}
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        {/* Album local visé. */}
-        <View style={styles.albumCard}>
-          <Text style={styles.albumTitle} numberOfLines={1}>
-            {title}
-          </Text>
-          <Text style={styles.albumMeta} numberOfLines={1}>
-            {artist} · {albumTracks.length} {albumTracks.length > 1 ? 'titres' : 'titre'}
-          </Text>
-        </View>
+        <ScrollView
+          contentContainerStyle={{ paddingBottom: insets.bottom + spacing.xxl }}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Album local visé. */}
+          <View style={styles.albumCard}>
+            <Text style={styles.albumTitle} numberOfLines={1}>
+              {title}
+            </Text>
+            <Text style={styles.albumMeta} numberOfLines={1}>
+              {artist} · {albumTracks.length} {albumTracks.length > 1 ? 'titres' : 'titre'}
+            </Text>
+          </View>
 
-        {error && <Text style={styles.error}>{error}</Text>}
+          {error && <Text style={styles.error}>{error}</Text>}
 
-        {/* Phase validation : release choisie + mapping. */}
-        {release && mapping ? (
-          <>
-            <View style={styles.releaseHead}>
-              <TrackCover uri={release.coverArtUrl} size={64} fallbackIcon="album" />
-              <View style={styles.releaseHeadText}>
-                <Text style={styles.releaseTitle} numberOfLines={2}>
-                  {release.title}
-                </Text>
-                <Text style={styles.releaseArtist} numberOfLines={1}>
-                  {release.artist ?? UNKNOWN_ARTIST}
-                </Text>
-                <Text style={styles.matchSummary}>
-                  {matchedCount}/{mapping.length} piste{mapping.length > 1 ? 's' : ''} associée
-                  {matchedCount > 1 ? 's' : ''}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.list}>
-              {mapping.map((m, i) => (
-                <View key={`${m.release.discNo}-${m.release.position}-${i}`} style={styles.mapRow}>
-                  <Text style={styles.posLabel}>
-                    {multiDisc ? `${m.release.discNo}-${m.release.position}` : m.release.position}
+          {/* Phase validation : release choisie + mapping. */}
+          {release && mapping ? (
+            <>
+              <View style={styles.releaseHead}>
+                <TrackCover uri={release.coverArtUrl} size={64} fallbackIcon="album" />
+                <View style={styles.releaseHeadText}>
+                  <Text style={styles.releaseTitle} numberOfLines={2}>
+                    {release.title}
                   </Text>
-                  <View style={styles.mapText}>
-                    <Text style={styles.mapReleaseTitle} numberOfLines={1}>
-                      {m.release.title}
-                    </Text>
-                    {m.local ? (
-                      <Text style={styles.mapLocal} numberOfLines={1}>
-                        {m.local.title}
-                      </Text>
-                    ) : (
-                      <View style={styles.missingRow}>
-                        <Icon name="warning" size={13} color={colors.textMuted} />
-                        <Text style={styles.mapMissing}>Aucun fichier local</Text>
-                      </View>
-                    )}
-                  </View>
+                  <Text style={styles.releaseArtist} numberOfLines={1}>
+                    {release.artist ?? UNKNOWN_ARTIST}
+                  </Text>
+                  <Text style={styles.matchSummary}>
+                    {matchedCount}/{mapping.length} piste{mapping.length > 1 ? 's' : ''} associée
+                    {matchedCount > 1 ? 's' : ''}
+                  </Text>
                 </View>
-              ))}
-            </View>
-
-            <Pressable
-              onPress={applyMapping}
-              disabled={matchedCount === 0}
-              style={({ pressed }) => [
-                styles.primaryButton,
-                pressed && styles.primaryPressed,
-                matchedCount === 0 && styles.buttonDisabled,
-              ]}
-              accessibilityRole="button"
-              accessibilityLabel="Appliquer cette identification"
-            >
-              <Icon name="check" size={20} color={colors.onAccent} />
-              <Text style={styles.primaryLabel}>Appliquer l’ordre</Text>
-            </Pressable>
-            <Pressable
-              onPress={backToCandidates}
-              style={({ pressed }) => [styles.secondaryButton, pressed && styles.secondaryPressed]}
-              accessibilityRole="button"
-              accessibilityLabel="Choisir un autre album"
-            >
-              <Text style={styles.secondaryLabel}>Choisir un autre</Text>
-            </Pressable>
-          </>
-        ) : (
-          <>
-            {/* Phase candidats. */}
-            {(loading || busy) && (
-              <View style={styles.centerState}>
-                <ActivityIndicator color={colors.accent} />
-                <Text style={styles.stateText}>{busy ? 'Chargement…' : 'Recherche…'}</Text>
               </View>
-            )}
 
-            {!loading && !busy && candidates && candidates.length === 0 && (
-              <Text style={styles.empty}>
-                Aucun album trouvé. Vérifie le nom de l’album et de l’artiste dans les tags.
-              </Text>
-            )}
-
-            {!busy &&
-              candidates?.map((c) => (
-                <Pressable
-                  key={c.mbid}
-                  onPress={() => void selectCandidate(c)}
-                  style={({ pressed }) => [styles.candidateRow, pressed && styles.rowPressed]}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Choisir ${c.title}${c.artist ? `, ${c.artist}` : ''}`}
-                >
-                  <TrackCover uri={c.coverArtUrl} size={52} fallbackIcon="album" />
-                  <View style={styles.candidateText}>
-                    <Text style={styles.candidateTitle} numberOfLines={1}>
-                      {c.title}
+              <View style={styles.list}>
+                {mapping.map((m, i) => (
+                  <View
+                    key={`${m.release.discNo}-${m.release.position}-${i}`}
+                    style={styles.mapRow}
+                  >
+                    <Text style={styles.posLabel}>
+                      {multiDisc ? `${m.release.discNo}-${m.release.position}` : m.release.position}
                     </Text>
-                    <Text style={styles.candidateMeta} numberOfLines={1}>
-                      {[c.artist, c.year?.toString(), trackCountLabel(c.trackCount)]
-                        .filter(Boolean)
-                        .join(' · ') || UNKNOWN_ARTIST}
-                    </Text>
+                    <View style={styles.mapText}>
+                      <Text style={styles.mapReleaseTitle} numberOfLines={1}>
+                        {m.release.title}
+                      </Text>
+                      {m.local ? (
+                        <Text style={styles.mapLocal} numberOfLines={1}>
+                          {m.local.title}
+                        </Text>
+                      ) : (
+                        <View style={styles.missingRow}>
+                          <Icon name="warning" size={13} color={colors.textMuted} />
+                          <Text style={styles.mapMissing}>Aucun fichier local</Text>
+                        </View>
+                      )}
+                    </View>
                   </View>
-                  <Icon name="chevron_right" size={22} color={colors.textMuted} />
-                </Pressable>
-              ))}
+                ))}
+              </View>
 
-            {!loading && !busy && error && (
               <Pressable
-                onPress={() => void loadCandidates()}
+                onPress={applyMapping}
+                disabled={matchedCount === 0}
+                style={({ pressed }) => [
+                  styles.primaryButton,
+                  pressed && styles.primaryPressed,
+                  matchedCount === 0 && styles.buttonDisabled,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Appliquer cette identification"
+              >
+                <Icon name="check" size={20} color={colors.onAccent} />
+                <Text style={styles.primaryLabel}>Appliquer l’ordre</Text>
+              </Pressable>
+              <Pressable
+                onPress={backToCandidates}
                 style={({ pressed }) => [
                   styles.secondaryButton,
                   pressed && styles.secondaryPressed,
                 ]}
                 accessibilityRole="button"
-                accessibilityLabel="Réessayer"
+                accessibilityLabel="Choisir un autre album"
               >
-                <Icon name="refresh" size={20} color={colors.textPrimary} />
-                <Text style={styles.secondaryLabel}>Réessayer</Text>
+                <Text style={styles.secondaryLabel}>Choisir un autre</Text>
               </Pressable>
-            )}
+            </>
+          ) : (
+            <>
+              {/* Termes de recherche éditables : rectifier un tag album/artiste approximatif. */}
+              <View style={styles.searchCard}>
+                <TextInput
+                  value={albumInput}
+                  onChangeText={setAlbumInput}
+                  placeholder="Album"
+                  placeholderTextColor={colors.textMuted}
+                  style={styles.input}
+                  autoCapitalize="words"
+                  returnKeyType="search"
+                />
+                <TextInput
+                  value={artistInput}
+                  onChangeText={setArtistInput}
+                  placeholder="Artiste de l’album"
+                  placeholderTextColor={colors.textMuted}
+                  style={styles.input}
+                  autoCapitalize="words"
+                  returnKeyType="search"
+                  onSubmitEditing={() => void loadCandidates()}
+                />
+                <Pressable
+                  onPress={() => void loadCandidates()}
+                  disabled={loading || busy}
+                  style={({ pressed }) => [
+                    styles.searchButton,
+                    pressed && styles.secondaryPressed,
+                    (loading || busy) && styles.buttonDisabled,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Rechercher l’album"
+                >
+                  <Icon name="search" size={20} color={colors.textPrimary} />
+                  <Text style={styles.secondaryLabel}>Rechercher</Text>
+                </Pressable>
+              </View>
 
-            {/* Réinitialisation d'une identification précédente. */}
-            {alreadyIdentified && (
-              <Pressable
-                onPress={resetIdentification}
-                style={({ pressed }) => [styles.resetButton, pressed && styles.secondaryPressed]}
-                accessibilityRole="button"
-                accessibilityLabel="Réinitialiser l’identification"
-              >
-                <Icon name="restart_alt" size={20} color={colors.textSecondary} />
-                <Text style={styles.resetLabel}>Réinitialiser (revenir aux tags)</Text>
-              </Pressable>
-            )}
-          </>
-        )}
-      </ScrollView>
+              {/* Phase candidats. */}
+              {(loading || busy) && (
+                <View style={styles.centerState}>
+                  <ActivityIndicator color={colors.accent} />
+                  <Text style={styles.stateText}>{busy ? 'Chargement…' : 'Recherche…'}</Text>
+                </View>
+              )}
+
+              {!loading && !busy && candidates && candidates.length === 0 && (
+                <Text style={styles.empty}>
+                  Aucun album trouvé. Vérifie le nom de l’album et de l’artiste dans les tags.
+                </Text>
+              )}
+
+              {!busy &&
+                candidates?.map((c) => (
+                  <Pressable
+                    key={c.mbid}
+                    onPress={() => void selectCandidate(c)}
+                    style={({ pressed }) => [styles.candidateRow, pressed && styles.rowPressed]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Choisir ${c.title}${c.artist ? `, ${c.artist}` : ''}`}
+                  >
+                    <TrackCover uri={c.coverArtUrl} size={52} fallbackIcon="album" />
+                    <View style={styles.candidateText}>
+                      <Text style={styles.candidateTitle} numberOfLines={1}>
+                        {c.title}
+                      </Text>
+                      <Text style={styles.candidateMeta} numberOfLines={1}>
+                        {[c.artist, c.year?.toString(), trackCountLabel(c.trackCount)]
+                          .filter(Boolean)
+                          .join(' · ') || UNKNOWN_ARTIST}
+                      </Text>
+                    </View>
+                    <Icon name="chevron_right" size={22} color={colors.textMuted} />
+                  </Pressable>
+                ))}
+
+              {/* Réinitialisation d'une identification précédente. */}
+              {alreadyIdentified && (
+                <Pressable
+                  onPress={resetIdentification}
+                  style={({ pressed }) => [styles.resetButton, pressed && styles.secondaryPressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Réinitialiser l’identification"
+                >
+                  <Icon name="restart_alt" size={20} color={colors.textSecondary} />
+                  <Text style={styles.resetLabel}>Réinitialiser (revenir aux tags)</Text>
+                </Pressable>
+              )}
+            </>
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }
@@ -341,6 +399,35 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  flex: {
+    flex: 1,
+  },
+  searchCard: {
+    marginHorizontal: spacing.xxl,
+    marginBottom: spacing.lg,
+  },
+  input: {
+    ...typography.heading,
+    fontSize: 15,
+    marginBottom: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    color: colors.textPrimary,
+  },
+  searchButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
   },
   header: {
     flexDirection: 'row',

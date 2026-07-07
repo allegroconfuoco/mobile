@@ -1,4 +1,6 @@
-import { useActiveTrack, useIsPlaying, useProgress, type Track } from 'react-native-track-player';
+import { useIsPlaying, useProgress, type Track } from 'react-native-track-player';
+
+import { useQueue } from './PlayerProvider';
 
 /** Instantané réactif de l'état de lecture, prêt pour l'UI. */
 export type PlaybackState = {
@@ -13,12 +15,19 @@ export type PlaybackState = {
 /**
  * Expose l'état de lecture à l'UI.
  *
- * Simple agrégat des hooks de react-native-track-player : chacun s'abonne aux événements du
- * lecteur et re-rend le composant qui l'utilise. `useProgress` interroge la position à
- * intervalle régulier (250 ms) pour animer la barre de progression sans surcharger.
+ * La **piste active** est lue depuis le snapshot partagé de la file (`useQueue`, unique instance
+ * dans `PlayerProvider`, resynchronisé sur `Event.PlaybackActiveTrackChanged`) plutôt que via
+ * `useActiveTrack` : ce dernier maintient un état LOCAL par composant (basé sur `event.track`, sans
+ * re-lecture de la source native), si bien que deux consommateurs — mini-player et écran Lecture —
+ * pouvaient afficher deux titres différents dès qu'une instance ratait un événement (transition de
+ * modal, retour d'arrière-plan). Une source unique élimine toute divergence possible.
+ *
+ * `useProgress` (position, 250 ms) et `useIsPlaying` restent par composant mais s'auto-corrigent
+ * (sondage / re-lecture native), donc sans risque de divergence persistante.
  */
 export function usePlayback(): PlaybackState {
-  const track = useActiveTrack();
+  const { tracks, activeIndex } = useQueue();
+  const track = activeIndex != null ? tracks[activeIndex] : undefined;
   const { playing } = useIsPlaying();
   const { position, duration } = useProgress(250);
 

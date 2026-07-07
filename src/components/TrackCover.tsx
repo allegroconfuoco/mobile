@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { StyleSheet, View, type ImageStyle, type StyleProp, type ViewStyle } from 'react-native';
 import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 
-import { colors, coverFallback, radii } from '@/theme';
+import { colors, coverFallback, coverGradient, radii } from '@/theme';
 import { Icon, type IconName } from '@/components/Icon';
 
 /**
@@ -18,6 +19,8 @@ type TrackCoverProps = {
   fill?: boolean;
   /** Icône de repli quand aucune pochette (défaut : note de musique). */
   fallbackIcon?: IconName;
+  /** Graine du dégradé de repli (titre + artiste) : dégradé déterministe et stable par piste. */
+  seed?: string;
   style?: ViewStyle;
 };
 
@@ -26,6 +29,7 @@ export function TrackCover({
   size = 44,
   fill = false,
   fallbackIcon = 'music_note',
+  seed = '',
   style,
 }: TrackCoverProps) {
   // Une pochette distante (Cover Art Archive, issue #19) peut renvoyer 404 : on retombe alors sur
@@ -52,6 +56,12 @@ export function TrackCover({
   }
   return (
     <View style={[box, styles.fallback, style]}>
+      <LinearGradient
+        colors={coverGradient(seed) as [string, string]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFill}
+      />
       <Icon name={fallbackIcon} size={iconSize} color={colors.onAccent} />
     </View>
   );
@@ -64,6 +74,8 @@ const styles = StyleSheet.create({
   fallback: {
     alignItems: 'center',
     justifyContent: 'center',
+    // `overflow: hidden` pour que le dégradé absolu respecte le rayon de la pochette.
+    overflow: 'hidden',
     backgroundColor: coverFallback,
   },
 });

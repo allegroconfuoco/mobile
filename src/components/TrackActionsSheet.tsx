@@ -1,8 +1,8 @@
-import { Modal, Pressable, StyleSheet, Text } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Pressable, StyleSheet, Text } from 'react-native';
 
 import { colors, radii, spacing, typography } from '@/theme';
 import { Icon, type IconName } from '@/components/Icon';
+import { BottomSheet } from '@/components/BottomSheet';
 
 /**
  * Menu d'actions sur une piste, présenté en feuille basse (bottom sheet).
@@ -13,9 +13,13 @@ import { Icon, type IconName } from '@/components/Icon';
 export type TrackActionsSheetProps = {
   /** Titre affiché en en-tête, ou `null` pour garder la feuille fermée. */
   title: string | null;
+  /** La piste est-elle dans les favoris ? (bascule le libellé/l'icône de l'action favori). */
+  isFavorite?: boolean;
   onClose: () => void;
   onPlayNext: () => void;
   onAddToQueue: () => void;
+  /** Bascule l'état favori de la piste. Optionnel : l'action n'apparaît que si fourni. */
+  onToggleFavorite?: () => void;
   /** Ouvre le sélecteur de playlist pour y ajouter la piste. */
   onAddToPlaylist: () => void;
   /** Ouvre l'écran de correction des métadonnées (valider / corriger le match MusicBrainz). */
@@ -26,14 +30,15 @@ export type TrackActionsSheetProps = {
 
 export function TrackActionsSheet({
   title,
+  isFavorite = false,
   onClose,
   onPlayNext,
   onAddToQueue,
+  onToggleFavorite,
   onAddToPlaylist,
   onFixMetadata,
   onExclude,
 }: TrackActionsSheetProps) {
-  const insets = useSafeAreaInsets();
   const visible = title !== null;
 
   // Referme la feuille puis exécute l'action, pour éviter un flash de la feuille pendant la mutation.
@@ -43,35 +48,42 @@ export function TrackActionsSheet({
   };
 
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={onClose}
-      statusBarTranslucent
-    >
-      <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Fermer le menu">
-        {/* Empêche la propagation du tap depuis la feuille vers le fond. */}
-        <Pressable style={[styles.sheet, { paddingBottom: insets.bottom + spacing.sm }]}>
-          <Text style={styles.header} numberOfLines={1}>
-            {title}
-          </Text>
-          <Action icon="playlist_play" label="Lire ensuite" onPress={run(onPlayNext)} />
-          <Action icon="playlist_add" label="Ajouter à la file" onPress={run(onAddToQueue)} />
-          <Action
-            icon="playlist_add_check"
-            label="Ajouter à une playlist"
-            onPress={run(onAddToPlaylist)}
-          />
-          <Action icon="edit_note" label="Corriger les infos" onPress={run(onFixMetadata)} />
-          <Action icon="block" label="Exclure de la bibliothèque" onPress={run(onExclude)} />
-        </Pressable>
-      </Pressable>
-    </Modal>
+    <BottomSheet visible={visible} onClose={onClose}>
+      <Text style={styles.header} numberOfLines={1}>
+        {title}
+      </Text>
+      <Action icon="playlist_play" label="Lire ensuite" onPress={run(onPlayNext)} />
+      <Action icon="playlist_add" label="Ajouter à la file" onPress={run(onAddToQueue)} />
+      {onToggleFavorite && (
+        <Action
+          icon={isFavorite ? 'favorite' : 'favorite_border'}
+          filled={isFavorite}
+          label={isFavorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+          onPress={run(onToggleFavorite)}
+        />
+      )}
+      <Action
+        icon="playlist_add_check"
+        label="Ajouter à une playlist"
+        onPress={run(onAddToPlaylist)}
+      />
+      <Action icon="edit_note" label="Corriger les infos" onPress={run(onFixMetadata)} />
+      <Action icon="block" label="Exclure de la bibliothèque" onPress={run(onExclude)} />
+    </BottomSheet>
   );
 }
 
-function Action({ icon, label, onPress }: { icon: IconName; label: string; onPress: () => void }) {
+function Action({
+  icon,
+  label,
+  onPress,
+  filled = false,
+}: {
+  icon: IconName;
+  label: string;
+  onPress: () => void;
+  filled?: boolean;
+}) {
   return (
     <Pressable
       onPress={onPress}
@@ -79,27 +91,13 @@ function Action({ icon, label, onPress }: { icon: IconName; label: string; onPre
       accessibilityRole="button"
       accessibilityLabel={label}
     >
-      <Icon name={icon} size={22} color={colors.accentIcon} />
+      <Icon name={icon} size={22} color={colors.accentIcon} filled={filled} />
       <Text style={styles.actionLabel}>{label}</Text>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.55)',
-  },
-  sheet: {
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: radii.lg,
-    borderTopRightRadius: radii.lg,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    paddingTop: spacing.lg,
-    paddingHorizontal: spacing.sm,
-  },
   header: {
     ...typography.label,
     color: colors.textMuted,

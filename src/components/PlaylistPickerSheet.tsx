@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { colors, radii, spacing, typography } from '@/theme';
 import { Icon } from '@/components/Icon';
+import { BottomSheet } from '@/components/BottomSheet';
 import { PlaylistNameDialog } from '@/components/PlaylistNameDialog';
 import { usePlaylistsContext } from '@/library/PlaylistsProvider';
 import type { LocalTrack } from '@/library/useAudioLibrary';
@@ -22,7 +22,6 @@ export type PlaylistPickerSheetProps = {
 };
 
 export function PlaylistPickerSheet({ track, onClose }: PlaylistPickerSheetProps) {
-  const insets = useSafeAreaInsets();
   const { playlists, createPlaylist, addTracksToPlaylist } = usePlaylistsContext();
   const [creating, setCreating] = useState(false);
 
@@ -43,53 +42,43 @@ export function PlaylistPickerSheet({ track, onClose }: PlaylistPickerSheetProps
 
   return (
     <>
-      <Modal
-        visible={visible && !creating}
-        transparent
-        animationType="fade"
-        onRequestClose={onClose}
-        statusBarTranslucent
-      >
-        <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Fermer le menu">
-          <Pressable style={[styles.sheet, { paddingBottom: insets.bottom + spacing.sm }]}>
-            <Text style={styles.header} numberOfLines={1}>
-              Ajouter à une playlist
-            </Text>
+      <BottomSheet visible={visible && !creating} onClose={onClose}>
+        <Text style={styles.header} numberOfLines={1}>
+          Ajouter à une playlist
+        </Text>
 
+        <Pressable
+          onPress={() => setCreating(true)}
+          style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+          accessibilityRole="button"
+          accessibilityLabel="Nouvelle playlist"
+        >
+          <Icon name="add" size={22} color={colors.accentIcon} />
+          <Text style={styles.rowLabel}>Nouvelle playlist</Text>
+        </Pressable>
+
+        <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
+          {playlists.map((p) => (
             <Pressable
-              onPress={() => setCreating(true)}
+              key={p.id}
+              onPress={() => addTo(p.id)}
               style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
               accessibilityRole="button"
-              accessibilityLabel="Nouvelle playlist"
+              accessibilityLabel={`Ajouter à ${p.name}`}
             >
-              <Icon name="add" size={22} color={colors.accentIcon} />
-              <Text style={styles.rowLabel}>Nouvelle playlist</Text>
+              <Icon name="queue_music" size={22} color={colors.textSecondary} />
+              <View style={styles.rowText}>
+                <Text style={styles.rowLabel} numberOfLines={1}>
+                  {p.name}
+                </Text>
+                <Text style={styles.rowHint}>
+                  {p.trackCount} {p.trackCount > 1 ? 'titres' : 'titre'}
+                </Text>
+              </View>
             </Pressable>
-
-            <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
-              {playlists.map((p) => (
-                <Pressable
-                  key={p.id}
-                  onPress={() => addTo(p.id)}
-                  style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Ajouter à ${p.name}`}
-                >
-                  <Icon name="queue_music" size={22} color={colors.textSecondary} />
-                  <View style={styles.rowText}>
-                    <Text style={styles.rowLabel} numberOfLines={1}>
-                      {p.name}
-                    </Text>
-                    <Text style={styles.rowHint}>
-                      {p.trackCount} {p.trackCount > 1 ? 'titres' : 'titre'}
-                    </Text>
-                  </View>
-                </Pressable>
-              ))}
-            </ScrollView>
-          </Pressable>
-        </Pressable>
-      </Modal>
+          ))}
+        </ScrollView>
+      </BottomSheet>
 
       <PlaylistNameDialog
         visible={creating}
@@ -103,20 +92,6 @@ export function PlaylistPickerSheet({ track, onClose }: PlaylistPickerSheetProps
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.55)',
-  },
-  sheet: {
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: radii.lg,
-    borderTopRightRadius: radii.lg,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    paddingTop: spacing.lg,
-    paddingHorizontal: spacing.sm,
-  },
   header: {
     ...typography.label,
     color: colors.textMuted,

@@ -1,4 +1,13 @@
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  Animated,
+  type LayoutChangeEvent,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
 import { colors, spacing, typography } from '@/theme';
 
@@ -15,16 +24,67 @@ type SegmentedControlProps<T extends string> = {
 };
 
 /**
- * Sélecteur de vue « Forge » : à plat, labels en majuscules, liseré accent sous l'option active
- * (même langage visuel que la tab bar). Défilable horizontalement pour absorber un nombre variable
- * d'options (Morceaux / Artistes / Albums / Playlists) sans clipper sur les écrans étroits ; le
- * liseré bas reste pleine largeur (porté par le conteneur, pas par la zone défilante).
+ * Sélecteur de vue « Forge » : à plat, labels en majuscules, liseré accent **glissant** sous
+ * l'option active (motion design, API Animated du cœur RN). On mesure la position/largeur de
+ * chaque option (`onLayout`) puis on anime l'indicateur vers l'option sélectionnée. Défilable
+ * horizontalement pour absorber un nombre variable d'options sans clipper.
  */
 export function SegmentedControl<T extends string>({
   segments,
   value,
   onChange,
 }: SegmentedControlProps<T>) {
+  // Positions mesurées de chaque option (x + largeur) dans la zone défilante.
+  const layouts = useRef<Record<string, { x: number; width: number }>>({});
+  const [translateX] = useState(() => new Animated.Value(0));
+  const [width] = useState(() => new Animated.Value(0));
+  // La première mise en place se fait sans animation (pas de « saut » depuis 0 au montage).
+  const animatedOnce = useRef(false);
+
+  const moveTo = useCallback(
+    (key: string, animate: boolean) => {
+      const layout = layouts.current[key];
+      if (!layout) {
+        return;
+      }
+      if (animate) {
+        // useNativeDriver:false car on anime la largeur (propriété de layout).
+        Animated.parallel([
+          Animated.spring(translateX, {
+            toValue: layout.x,
+            useNativeDriver: false,
+            speed: 20,
+            bounciness: 2,
+          }),
+          Animated.spring(width, {
+            toValue: layout.width,
+            useNativeDriver: false,
+            speed: 20,
+            bounciness: 2,
+          }),
+        ]).start();
+      } else {
+        translateX.setValue(layout.x);
+        width.setValue(layout.width);
+      }
+    },
+    [translateX, width]
+  );
+
+  useEffect(() => {
+    moveTo(value, animatedOnce.current);
+    animatedOnce.current = true;
+  }, [value, moveTo]);
+
+  const onItemLayout = (key: string, e: LayoutChangeEvent) => {
+    const { x, width: w } = e.nativeEvent.layout;
+    layouts.current[key] = { x, width: w };
+    // Positionne l'indicateur dès que l'option active est mesurée (sans animation).
+    if (key === value) {
+      moveTo(value, false);
+    }
+  };
+
   return (
     <View style={styles.container}>
       <ScrollView
@@ -37,8 +97,9 @@ export function SegmentedControl<T extends string>({
           return (
             <Pressable
               key={seg.value}
+              onLayout={(e) => onItemLayout(seg.value, e)}
               onPress={() => onChange(seg.value)}
-              style={[styles.item, active && styles.itemActive]}
+              style={styles.item}
               accessibilityRole="tab"
               accessibilityState={{ selected: active }}
               accessibilityLabel={seg.label}
@@ -47,6 +108,7 @@ export function SegmentedControl<T extends string>({
             </Pressable>
           );
         })}
+        <Animated.View style={[styles.indicator, { width, transform: [{ translateX }] }]} />
       </ScrollView>
     </View>
   );
@@ -64,13 +126,6 @@ const styles = StyleSheet.create({
   },
   item: {
     paddingBottom: spacing.md,
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
-    // Fait chevaucher le liseré actif (2px) sur celui du conteneur (1px), comme avant.
-    marginBottom: -1,
-  },
-  itemActive: {
-    borderBottomColor: colors.accent,
   },
   label: {
     ...typography.label,
@@ -78,6 +133,14 @@ const styles = StyleSheet.create({
   },
   labelActive: {
     color: colors.textPrimary,
+  },
+  // Liseré actif glissant : posé au bas de la zone défilante, positionné/dimensionné par animation.
+  indicator: {
+    position: 'absolute',
+    left: 0,
+    bottom: -1,
+    height: 2,
+    backgroundColor: colors.accent,
   },
 });
 

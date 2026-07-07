@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
 import {
+  Animated,
   type LayoutChangeEvent,
   PanResponder,
   Pressable,
@@ -10,11 +11,19 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
+import { RepeatMode } from 'react-native-track-player';
 
-import { colors, coverFallback, radii, spacing, typography } from '@/theme';
+import { colors, coverFallback, coverGradient, radii, spacing, typography } from '@/theme';
 import { Icon } from '@/components/Icon';
-import { usePlayer } from '@/player/PlayerProvider';
+import { PressableScale } from '@/components/PressableScale';
+import { TrackActionsSheet } from '@/components/TrackActionsSheet';
+import { PlaylistPickerSheet } from '@/components/PlaylistPickerSheet';
+import { usePlayer, usePlaybackMode } from '@/player/PlayerProvider';
 import { usePlayback } from '@/player/usePlayback';
+import { useLibrary } from '@/library/LibraryProvider';
+import { useFavorites } from '@/library/FavoritesProvider';
+import { tapLight, tapMedium } from '@/lib/haptics';
 
 /** Formate une durée (secondes) en `m:ss`. */
 function formatTime(seconds: number): string {
@@ -32,7 +41,18 @@ export default function NowPlayingScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { track, isPlaying, position, duration } = usePlayback();
-  const { togglePlayPause, skipToNext, skipToPrevious, seekTo } = usePlayer();
+  const { togglePlayPause, skipToNext, skipToPrevious, seekTo, playNext, addToQueue } = usePlayer();
+  const { repeatMode, shuffle, cycleRepeat, toggleShuffle } = usePlaybackMode();
+  const { tracksById, setTrackExcluded } = useLibrary();
+  const { isFavorite, toggleFavorite } = useFavorites();
+
+  // Piste locale correspondant à la lecture en cours (pour favori + menu d'actions).
+  const local = track ? (tracksById.get(String(track.id)) ?? null) : null;
+  const liked = local ? isFavorite(local.id) : false;
+
+  // Menu « … » (réutilise le bottom sheet d'actions de la bibliothèque) + sélecteur de playlist.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const [barWidth, setBarWidth] = useState(0);
   // Fraction visée pendant un glissement (scrubbing). `null` = pas de glissement en cours :
@@ -47,6 +67,83 @@ export default function NowPlayingScreen() {
   useEffect(() => {
     seekRef.current = { barWidth, duration, seekTo };
   });
+
+  // Entrée de l'écran : léger fondu + montée (motion design, API Animated du cœur RN).
+  const [enter] = useState(() => new Animated.Value(0));
+  useEffect(() => {
+    Animated.timing(enter, {
+      toValue: 1,
+      duration: 320,
+      useNativeDriver: true,
+    }).start();
+  }, [enter]);
+
+  // Glissement vers le bas pour fermer (comme un vrai lecteur musical). La pochette sert de
+  // poignée de glissement (grande zone non interactive) ; `PanResponder` du cœur RN, cf. CLAUDE.md.
+  const [dragY] = useState(() => new Animated.Value(0));
+  const dismissResponder = useMemo(
+    () =>
+      PanResponder.create({
+        // On ne prend le geste que pour un glissement franchement vertical vers le bas,
+        // pour ne pas gêner un tap sur la pochette.
+        onMoveShouldSetPanResponder: (_e, g) => g.dy > 8 && g.dy > Math.abs(g.dx),
+        onPanResponderMove: (_e, g) => {
+          if (g.dy > 0) {
+            dragY.setValue(g.dy);
+          }
+        },
+        onPanResponderRelease: (_e, g) => {
+          // Assez loin OU geste rapide vers le bas → on ferme ; sinon retour en place.
+          if (g.dy > 120 || g.vy > 0.6) {
+            router.back();
+          } else {
+            Animated.spring(dragY, {
+              toValue: 0,
+              useNativeDriver: true,
+              speed: 18,
+              bounciness: 6,
+            }).start();
+          }
+        },
+        onPanResponderTerminate: () => {
+          Animated.spring(dragY, {
+            toValue: 0,
+            useNativeDriver: true,
+            speed: 18,
+            bounciness: 6,
+          }).start();
+        },
+      }),
+    [dragY, router]
+  );
+
+  // La pochette « respire » : légèrement agrandie en lecture, resserrée en pause (repère d'état).
+  const [coverScale] = useState(() => new Animated.Value(1));
+  useEffect(() => {
+    Animated.spring(coverScale, {
+      toValue: isPlaying ? 1 : 0.965,
+      useNativeDriver: true,
+      speed: 12,
+      bounciness: 6,
+    }).start();
+  }, [isPlaying, coverScale]);
+
+  // « Pop » du coeur au like/unlike.
+  const [heartScale] = useState(() => new Animated.Value(1));
+  const onToggleFavorite = () => {
+    if (!local) {
+      return;
+    }
+    tapMedium();
+    toggleFavorite(local.id, local.mbid);
+    heartScale.setValue(0.8);
+    Animated.spring(heartScale, {
+      toValue: 1,
+      useNativeDriver: true,
+      speed: 14,
+      bounciness: 16,
+    }).start();
+  };
 
   const fractionAt = (locationX: number): number => {
     const { barWidth: width } = seekRef.current;
@@ -92,9 +189,29 @@ export default function NowPlayingScreen() {
   const artist = track?.artist ?? '—';
   const artwork = typeof track?.artwork === 'string' ? track.artwork : null;
 
+  // Répétition : couleur active hors « Off », icône « une piste » en mode Track.
+  const repeatActive = repeatMode !== RepeatMode.Off;
+  const repeatIcon = repeatMode === RepeatMode.Track ? 'repeat_one' : 'repeat';
+  const repeatLabel =
+    repeatMode === RepeatMode.Off
+      ? 'Répétition désactivée'
+      : repeatMode === RepeatMode.Track
+        ? 'Répéter la piste'
+        : 'Répéter la file';
+
   return (
-    <View
-      style={[styles.screen, { paddingTop: insets.top + spacing.sm, paddingBottom: insets.bottom }]}
+    <Animated.View
+      style={[
+        styles.screen,
+        { paddingTop: insets.top + spacing.sm, paddingBottom: insets.bottom },
+        {
+          opacity: enter,
+          transform: [
+            { translateY: enter.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) },
+            { translateY: dragY },
+          ],
+        },
+      ]}
     >
       {/* Barre supérieure : fermer + menu */}
       <View style={styles.topBar}>
@@ -106,16 +223,36 @@ export default function NowPlayingScreen() {
         >
           <Icon name="expand_more" size={28} color={colors.textPrimary} />
         </Pressable>
-        <Icon name="more_horiz" size={24} color={colors.textPrimary} />
+        <Pressable
+          onPress={() => {
+            if (local) {
+              tapLight();
+              setMenuOpen(true);
+            }
+          }}
+          disabled={!local}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Plus d'actions"
+        >
+          <Icon name="more_horiz" size={24} color={local ? colors.textPrimary : colors.textMuted} />
+        </Pressable>
       </View>
 
-      {/* Pochette */}
-      <View style={styles.coverWrap}>
-        {artwork ? (
-          <Image source={{ uri: artwork }} style={styles.cover} contentFit="cover" />
-        ) : (
-          <View style={styles.cover} />
-        )}
+      {/* Pochette (sert aussi de poignée : glisser vers le bas ferme la lecture) */}
+      <View style={styles.coverWrap} {...dismissResponder.panHandlers}>
+        <Animated.View style={[styles.coverShadow, { transform: [{ scale: coverScale }] }]}>
+          {artwork ? (
+            <Image source={{ uri: artwork }} style={styles.cover} contentFit="cover" />
+          ) : (
+            <LinearGradient
+              colors={coverGradient(`${title}${artist}`) as [string, string]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.cover}
+            />
+          )}
+        </Animated.View>
       </View>
 
       {/* Titre / artiste */}
@@ -130,7 +267,22 @@ export default function NowPlayingScreen() {
               {artist}
             </Text>
           </View>
-          <Icon name="favorite_border" size={26} color={colors.accentIcon} />
+          <Pressable
+            onPress={onToggleFavorite}
+            disabled={!local}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel={liked ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+          >
+            <Animated.View style={{ transform: [{ scale: heartScale }] }}>
+              <Icon
+                name={liked ? 'favorite' : 'favorite_border'}
+                filled={liked}
+                size={26}
+                color={!local ? colors.textMuted : liked ? colors.accent : colors.textSecondary}
+              />
+            </Animated.View>
+          </Pressable>
         </View>
       </View>
 
@@ -162,37 +314,69 @@ export default function NowPlayingScreen() {
 
       {/* Contrôles */}
       <View style={styles.controls}>
-        <Icon name="shuffle" size={23} color={colors.textSecondary} />
         <Pressable
-          onPress={skipToPrevious}
+          onPress={() => {
+            tapMedium();
+            toggleShuffle();
+          }}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel={shuffle ? 'Désactiver la lecture aléatoire' : 'Lecture aléatoire'}
+        >
+          <Icon name="shuffle" size={23} color={shuffle ? colors.accent : colors.textSecondary} />
+        </Pressable>
+        <Pressable
+          onPress={() => {
+            tapLight();
+            skipToPrevious();
+          }}
           hitSlop={12}
           accessibilityRole="button"
           accessibilityLabel="Piste précédente"
         >
           <Icon name="skip_previous" size={34} color={colors.textPrimary} />
         </Pressable>
-        <Pressable
-          onPress={() => void togglePlayPause()}
+        <PressableScale
+          onPress={() => {
+            tapLight();
+            void togglePlayPause();
+          }}
           style={styles.playButton}
           accessibilityRole="button"
           accessibilityLabel={isPlaying ? 'Mettre en pause' : 'Lire'}
         >
           <Icon name={isPlaying ? 'pause' : 'play_arrow'} size={36} color={colors.onAccent} />
-        </Pressable>
+        </PressableScale>
         <Pressable
-          onPress={skipToNext}
+          onPress={() => {
+            tapLight();
+            skipToNext();
+          }}
           hitSlop={12}
           accessibilityRole="button"
           accessibilityLabel="Piste suivante"
         >
           <Icon name="skip_next" size={34} color={colors.textPrimary} />
         </Pressable>
-        <Icon name="repeat" size={23} color={colors.textSecondary} />
+        <Pressable
+          onPress={() => {
+            tapMedium();
+            cycleRepeat();
+          }}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel={repeatLabel}
+        >
+          <Icon
+            name={repeatIcon}
+            size={23}
+            color={repeatActive ? colors.accent : colors.textSecondary}
+          />
+        </Pressable>
       </View>
 
-      {/* Actions secondaires */}
+      {/* Actions secondaires : la file d'attente. */}
       <View style={styles.secondary}>
-        <Icon name="lyrics" size={22} color={colors.textSecondary} />
         <Pressable
           onPress={() => router.push('/queue')}
           hitSlop={12}
@@ -201,9 +385,25 @@ export default function NowPlayingScreen() {
         >
           <Icon name="queue_music" size={22} color={colors.textSecondary} />
         </Pressable>
-        <Icon name="cast" size={22} color={colors.textSecondary} />
       </View>
-    </View>
+
+      {/* Menu d'actions sur la piste en cours (réutilisé de la bibliothèque). */}
+      <TrackActionsSheet
+        title={menuOpen ? (local?.title ?? title) : null}
+        isFavorite={liked}
+        onClose={() => setMenuOpen(false)}
+        onPlayNext={() => local && void playNext([local])}
+        onAddToQueue={() => local && void addToQueue([local])}
+        onToggleFavorite={onToggleFavorite}
+        onAddToPlaylist={() => setPickerOpen(true)}
+        onFixMetadata={() =>
+          local && router.push({ pathname: '/metadata-fix', params: { trackId: local.id } })
+        }
+        onExclude={() => local && setTrackExcluded(local.id, true)}
+      />
+
+      <PlaylistPickerSheet track={pickerOpen ? local : null} onClose={() => setPickerOpen(false)} />
+    </Animated.View>
   );
 }
 
@@ -224,11 +424,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: spacing.xl,
   },
-  cover: {
+  // Ombre portée sous la pochette (élévation Android + shadow iOS), sur le conteneur animé.
+  coverShadow: {
     width: 300,
-    height: 300,
     maxWidth: '80%',
     aspectRatio: 1,
+    borderRadius: radii.lg,
+    backgroundColor: coverFallback,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.45,
+    shadowRadius: 24,
+    elevation: 16,
+  },
+  cover: {
+    width: '100%',
+    height: '100%',
     borderRadius: radii.lg,
     backgroundColor: coverFallback,
   },

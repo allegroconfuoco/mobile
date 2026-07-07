@@ -6,6 +6,9 @@ import {
   SchibstedGrotesk_800ExtraBold,
 } from '@expo-google-fonts/schibsted-grotesk';
 import { MaterialSymbols_400Regular } from '@expo-google-fonts/material-symbols';
+// Instance FILL=1 (cœur plein) des Material Symbols Outlined, cf. theme.fontFamily.iconsFilled.
+// La police par défaut est FILL=0 (contour) : sans elle, un cœur liké ne peut pas être plein.
+import MaterialSymbolsFilled from '../../assets/fonts/MaterialSymbolsOutlined_Filled.ttf';
 import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
@@ -19,6 +22,7 @@ import { PlayerProvider } from '@/player/PlayerProvider';
 import { LibraryProvider } from '@/library/LibraryProvider';
 import { EnrichmentRunner } from '@/library/EnrichmentRunner';
 import { PlaylistsProvider } from '@/library/PlaylistsProvider';
+import { FavoritesProvider } from '@/library/FavoritesProvider';
 import { SyncProvider } from '@/sync/SyncProvider';
 
 // Garde le splash affiché tant que les polices ET la session ne sont pas prêtes.
@@ -32,6 +36,8 @@ export default function RootLayout() {
     SchibstedGrotesk_700Bold,
     SchibstedGrotesk_800ExtraBold,
     MaterialSymbols_400Regular,
+    // Clé = nom de famille référencé par theme.fontFamily.iconsFilled.
+    MaterialSymbolsFilled,
   });
 
   return (
@@ -42,11 +48,13 @@ export default function RootLayout() {
           {/* Enrichissement MusicBrainz de fond (issue #19) : lit useAuth + useLibrary, sans UI. */}
           <EnrichmentRunner />
           <PlaylistsProvider>
-            <SyncProvider>
-              <PlayerProvider>
-                <RootNavigator fontsReady={loaded || error != null} />
-              </PlayerProvider>
-            </SyncProvider>
+            <FavoritesProvider>
+              <SyncProvider>
+                <PlayerProvider>
+                  <RootNavigator fontsReady={loaded || error != null} />
+                </PlayerProvider>
+              </SyncProvider>
+            </FavoritesProvider>
           </PlaylistsProvider>
         </LibraryProvider>
       </AuthProvider>
@@ -94,6 +102,10 @@ function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
         <Stack.Screen name="queue" options={{ presentation: 'modal' }} />
         {/* Réglages > Bibliothèque locale (dossiers scannés / exclusions). */}
         <Stack.Screen name="library-settings" />
+        {/* Réglages > Lecture (répétition / lecture aléatoire par défaut). */}
+        <Stack.Screen name="playback-settings" />
+        {/* Favoris (morceaux likés), poussé. */}
+        <Stack.Screen name="favorites" />
         {/* Détails Bibliothèque (poussés) : morceaux d'un artiste / pistes d'un album. */}
         <Stack.Screen name="artist" />
         <Stack.Screen name="album" />

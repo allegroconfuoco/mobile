@@ -53,7 +53,12 @@ export default function SettingsScreen() {
       hint: libraryHint,
       href: '/library-settings',
     },
-    { icon: 'queue_music', label: 'Lecture', hint: 'Qualité, file d’attente' },
+    {
+      icon: 'queue_music',
+      label: 'Lecture',
+      hint: 'Répétition, lecture aléatoire',
+      href: '/playback-settings',
+    },
   ];
 
   const confirmSignOut = () => {

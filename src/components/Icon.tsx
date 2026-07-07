@@ -22,6 +22,7 @@ export type IconName =
   | 'skip_previous'
   | 'shuffle'
   | 'repeat'
+  | 'repeat_one'
   | 'favorite'
   | 'favorite_border'
   | 'cloud_done'
@@ -65,18 +66,35 @@ type IconProps = {
   name: IconName;
   size?: number;
   color?: string;
+  /**
+   * Rend la variante **pleine** (FILL=1) du glyphe via une seconde police (cf.
+   * `theme.fontFamily.iconsFilled`). La police par défaut est FILL=0 (contour) : `favorite` et
+   * `favorite_border` y désignent le MÊME glyphe contour, donc un cœur ne peut jamais paraître
+   * plein sans cette variante. Aujourd'hui seul `favorite` est disponible en plein.
+   */
+  filled?: boolean;
   style?: TextStyle;
 };
 
-export function Icon({ name, size = 24, color = colors.textPrimary, style }: IconProps) {
+export function Icon({
+  name,
+  size = 24,
+  color = colors.textPrimary,
+  filled = false,
+  style,
+}: IconProps) {
   return (
     <Text
+      // Remontage du <Text> quand le glyphe visible change (nom OU variante pleine). Les Material
+      // Symbols sont rendus par ligature ; sur certaines versions RN, recycler la vue texte native
+      // sans la remonter laisse la ligature figée. La clé garantit un re-façonnage propre.
+      key={`${name}${filled ? '-fill' : ''}`}
       // La police d'icônes n'a pas de vrai contenu textuel : on le cache aux lecteurs d'écran.
       accessible={false}
       allowFontScaling={false}
       style={[
         {
-          fontFamily: fontFamily.icons,
+          fontFamily: filled ? fontFamily.iconsFilled : fontFamily.icons,
           fontSize: size,
           lineHeight: size,
           color,
