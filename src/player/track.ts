@@ -25,8 +25,10 @@ export async function toPlayerTrack(local: LocalTrack): Promise<Track> {
     url,
     title: tags?.title ?? local.title,
     artist: tags?.artist ?? 'Artiste inconnu',
-    album: tags?.album ?? undefined,
-    artwork: tags?.artworkUri ?? undefined,
+    // Repli sur l'enrichissement MusicBrainz (issue #19) : album et pochette distante quand le
+    // fichier n'embarque ni tag album ni pochette. RNTP accepte une URL d'artwork distante.
+    album: tags?.album ?? local.album ?? undefined,
+    artwork: tags?.artworkUri ?? local.coverArtUrl ?? undefined,
     duration: local.durationMs != null ? local.durationMs / 1000 : undefined,
   };
 }

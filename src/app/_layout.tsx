@@ -17,6 +17,7 @@ import { colors } from '@/theme';
 import { AuthProvider, useAuth } from '@/auth/AuthProvider';
 import { PlayerProvider } from '@/player/PlayerProvider';
 import { LibraryProvider } from '@/library/LibraryProvider';
+import { EnrichmentRunner } from '@/library/EnrichmentRunner';
 import { PlaylistsProvider } from '@/library/PlaylistsProvider';
 import { SyncProvider } from '@/sync/SyncProvider';
 
@@ -38,6 +39,8 @@ export default function RootLayout() {
       <StatusBar style="light" />
       <AuthProvider>
         <LibraryProvider>
+          {/* Enrichissement MusicBrainz de fond (issue #19) : lit useAuth + useLibrary, sans UI. */}
+          <EnrichmentRunner />
           <PlaylistsProvider>
             <SyncProvider>
               <PlayerProvider>

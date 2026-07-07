@@ -80,7 +80,7 @@ export default function PlaylistScreen() {
         id: entry.sharedTrackId,
         title: localTrack?.title ?? entry.title ?? 'Titre inconnu',
         artist: localTrack?.artist ?? entry.artist ?? UNKNOWN_ARTIST,
-        artworkUri: localTrack?.artworkUri ?? null,
+        artworkUri: localTrack?.artworkUri ?? localTrack?.coverArtUrl ?? null,
         unavailable: localTrack === null,
       })),
     [entries]

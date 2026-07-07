@@ -65,7 +65,7 @@ export function TrackRow({
           )}
         </View>
       ) : (
-        <TrackCover uri={track.artworkUri} />
+        <TrackCover uri={track.artworkUri ?? track.coverArtUrl} />
       )}
       <View style={styles.text}>
         <Text style={[styles.title, isActive && styles.titleActive]} numberOfLines={1}>

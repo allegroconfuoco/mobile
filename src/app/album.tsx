@@ -45,7 +45,8 @@ export default function AlbumScreen() {
     return { albumTracks: ordered, sections: groupAlbumByDisc(ordered), indexById: map };
   }, [tracks, artist, title]);
 
-  const cover = albumTracks.find((t) => t.artworkUri)?.artworkUri ?? null;
+  // Première pochette disponible : tag local, sinon pochette d'enrichissement (issue #19).
+  const cover = albumTracks.map((t) => t.artworkUri ?? t.coverArtUrl).find(Boolean) ?? null;
   const multiDisc = sections.length > 1;
 
   return (

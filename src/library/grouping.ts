@@ -80,8 +80,9 @@ export function buildArtists(tracks: LocalTrack[]): ArtistGroup[] {
     }
     group.trackCount += 1;
     group.albums.add(albumKeyOf(t));
-    if (!group.artworkUri && t.artworkUri) {
-      group.artworkUri = t.artworkUri;
+    if (!group.artworkUri) {
+      // Pochette locale (tag) en priorité, sinon celle récupérée par l'enrichissement (issue #19).
+      group.artworkUri = t.artworkUri ?? t.coverArtUrl;
     }
   }
   return [...map.entries()]
@@ -108,8 +109,9 @@ export function buildAlbums(tracks: LocalTrack[]): AlbumGroup[] {
       map.set(key, group);
     }
     group.trackCount += 1;
-    if (!group.artworkUri && t.artworkUri) {
-      group.artworkUri = t.artworkUri;
+    if (!group.artworkUri) {
+      // Pochette locale (tag) en priorité, sinon celle récupérée par l'enrichissement (issue #19).
+      group.artworkUri = t.artworkUri ?? t.coverArtUrl;
     }
   }
   return [...map.entries()]

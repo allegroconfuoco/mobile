@@ -51,6 +51,10 @@ export type LocalTrack = {
   discNo: number | null;
   /** URI `file://` d'une pochette extraite en cache au scan, ou `null`. */
   artworkUri: string | null;
+  /** MBID résolu par l'enrichissement MusicBrainz (issue #19), ou `null`. */
+  mbid: string | null;
+  /** URL de pochette distante (Cover Art Archive) issue de l'enrichissement, repli d'affichage. */
+  coverArtUrl: string | null;
 };
 
 /** Un dossier de la bibliothèque, pour l'écran de réglages. */
@@ -119,6 +123,9 @@ function toRow(
     trackNo: tags.trackNo,
     discNo: tags.discNo,
     artworkUri: tags.artworkUri,
+    // Enrichissement (issue #19) : absent au scan, peuplé par le JOIN de `loadTracks`.
+    mbid: null,
+    coverArtUrl: null,
   };
 }
 
@@ -135,6 +142,8 @@ function rowToTrack(r: db.TrackRow): LocalTrack {
     trackNo: r.trackNo,
     discNo: r.discNo,
     artworkUri: r.artworkUri,
+    mbid: r.mbid,
+    coverArtUrl: r.coverArtUrl,
   };
 }
 
@@ -208,6 +217,11 @@ type UseAudioLibrary = {
   requestPermission: () => void;
   /** Relance un scan incrémental. */
   rescan: () => void;
+  /**
+   * Relit les pistes depuis SQLite sans re-scanner le media store. Sert à refléter une écriture
+   * hors scan (enrichissement MusicBrainz, issue #19) dans l'état affiché.
+   */
+  reloadTracks: () => void;
   /** Inclut/exclut un dossier du scan. */
   setFolderIncluded: (folder: string, included: boolean) => void;
   /** Exclut/réinclut une piste individuelle. */
@@ -340,6 +354,9 @@ export function useAudioLibrary(): UseAudioLibrary {
     setFolderPrefs((prev) => ({ ...prev, [folder]: included }));
   }, []);
 
+  // Relecture SQLite pure (pas de scan) : source de vérité déjà à jour après une écriture hors scan.
+  const reloadTracks = useCallback(() => setAllTracks(db.loadTracks()), []);
+
   const setTrackExcluded = useCallback((id: string, excluded: boolean) => {
     db.setTrackExcluded(id, excluded);
     setExcludedIds((prev) => {
@@ -382,6 +399,7 @@ export function useAudioLibrary(): UseAudioLibrary {
     excludedTracks,
     requestPermission: () => void requestPermission(),
     rescan: () => void scan(),
+    reloadTracks,
     setFolderIncluded,
     setTrackExcluded,
   };

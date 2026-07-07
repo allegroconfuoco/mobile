@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { StyleSheet, View, type ImageStyle, type StyleProp, type ViewStyle } from 'react-native';
 import { Image } from 'expo-image';
 
@@ -27,11 +28,15 @@ export function TrackCover({
   fallbackIcon = 'music_note',
   style,
 }: TrackCoverProps) {
+  // Une pochette distante (Cover Art Archive, issue #19) peut renvoyer 404 : on retombe alors sur
+  // le repli. On mémorise l'URI en échec pour que le repli disparaisse dès qu'une nouvelle URI
+  // arrive (recyclage des lignes de FlatList).
+  const [failedUri, setFailedUri] = useState<string | null>(null);
   const box: ViewStyle = fill
     ? { width: '100%', aspectRatio: 1, borderRadius: radii.sm }
     : { width: size, height: size, borderRadius: radii.sm };
   const iconSize = Math.round((fill ? 64 : size) * 0.42);
-  if (uri) {
+  if (uri && failedUri !== uri) {
     return (
       <Image
         source={{ uri }}
@@ -40,6 +45,7 @@ export function TrackCover({
         style={[box, styles.image, style] as StyleProp<ImageStyle>}
         contentFit="cover"
         transition={120}
+        onError={() => setFailedUri(uri)}
         accessible={false}
       />
     );
