@@ -131,6 +131,40 @@ export function parseFilename(filename: string): { artist: string | null; title:
   return { artist: null, title: parts[0] ?? cleanField(stem) };
 }
 
+/** Comparaison lâche de deux libellés (casse + espaces ignorés) pour repérer un artiste dupliqué. */
+function looseEqual(a: string, b: string): boolean {
+  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+  return norm(a) === norm(b);
+}
+
+/**
+ * Certains fichiers téléchargés collent « Artiste - Titre » directement dans le tag Titre (« Red Hot
+ * Chili Peppers - Can't Stop ») : envoyé tel quel, MusicBrainz cherche tout le libellé comme titre
+ * de morceau et ne trouve rien. Si le titre contient le séparateur artiste/titre, on le scinde :
+ *  - artiste connu ET égal au segment de tête → on retire ce préfixe redondant (on garde l'artiste) ;
+ *  - artiste inconnu → tête = artiste, queue = titre (même heuristique que le nom de fichier) ;
+ *  - artiste connu mais ≠ tête → ambigu (le « - » fait peut-être partie d'un vrai titre), on ne
+ *    touche à rien.
+ */
+function stripEmbeddedArtist(
+  title: string,
+  artist: string | null
+): { title: string; artist: string | null } {
+  const parts = title
+    .split(ARTIST_TITLE_SEPARATOR)
+    .map(cleanField)
+    .filter((p) => p.length > 0);
+  if (parts.length < 2) {
+    return { title, artist };
+  }
+  const head = parts[0];
+  const tail = parts[parts.length - 1];
+  if (artist) {
+    return looseEqual(head, artist) ? { title: tail, artist } : { title, artist };
+  }
+  return { title: tail, artist: head };
+}
+
 // --- Point d'entrée ---
 
 /**
@@ -150,11 +184,16 @@ export function buildMatchQuery(track: MatchQueryInput): MatchQuery | null {
   const tagArtist = track.artist ? cleanField(track.artist) : '';
   const fromFilename = tagTitle && tagArtist ? null : parseFilename(track.filename);
 
-  const title = tagTitle || fromFilename?.title || '';
-  if (!title) {
+  const rawTitle = tagTitle || fromFilename?.title || '';
+  if (!rawTitle) {
     return null;
   }
-  const artist = tagArtist || fromFilename?.artist || null;
+  const rawArtist = tagArtist || fromFilename?.artist || null;
+
+  // Nettoie un tag Titre pollué par « Artiste - Titre » (voir `stripEmbeddedArtist`). Le nom de
+  // fichier, lui, est déjà scindé par `parseFilename`, donc ce second passage ne le concerne que
+  // si le titre retenu vient du tag.
+  const { title, artist } = stripEmbeddedArtist(rawTitle, rawArtist);
 
   const source: MatchQuery['source'] = tagTitle
     ? artist && !tagArtist
