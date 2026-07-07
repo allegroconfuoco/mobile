@@ -175,6 +175,9 @@ function LibraryContent({
         onPlayNext={() => menuTrack && void playNext([menuTrack])}
         onAddToQueue={() => menuTrack && void addToQueue([menuTrack])}
         onAddToPlaylist={() => setPickerTrack(menuTrack)}
+        onFixMetadata={() =>
+          menuTrack && router.push({ pathname: '/metadata-fix', params: { trackId: menuTrack.id } })
+        }
         onExclude={() => menuTrack && setTrackExcluded(menuTrack.id, true)}
       />
 

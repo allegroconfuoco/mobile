@@ -18,6 +18,8 @@ export type TrackActionsSheetProps = {
   onAddToQueue: () => void;
   /** Ouvre le sélecteur de playlist pour y ajouter la piste. */
   onAddToPlaylist: () => void;
+  /** Ouvre l'écran de correction des métadonnées (valider / corriger le match MusicBrainz). */
+  onFixMetadata: () => void;
   /** Exclut la piste de la bibliothèque (et des scans suivants). */
   onExclude: () => void;
 };
@@ -28,6 +30,7 @@ export function TrackActionsSheet({
   onPlayNext,
   onAddToQueue,
   onAddToPlaylist,
+  onFixMetadata,
   onExclude,
 }: TrackActionsSheetProps) {
   const insets = useSafeAreaInsets();
@@ -60,6 +63,7 @@ export function TrackActionsSheet({
             label="Ajouter à une playlist"
             onPress={run(onAddToPlaylist)}
           />
+          <Action icon="edit_note" label="Corriger les infos" onPress={run(onFixMetadata)} />
           <Action icon="block" label="Exclure de la bibliothèque" onPress={run(onExclude)} />
         </Pressable>
       </Pressable>

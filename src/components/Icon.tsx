@@ -54,6 +54,8 @@ export type IconName =
   | 'edit'
   | 'playlist_add_check'
   | 'check'
+  | 'check_circle'
+  | 'edit_note'
   | 'logout';
 
 type IconProps = {

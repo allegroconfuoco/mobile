@@ -99,6 +99,8 @@ function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
         <Stack.Screen name="album" />
         {/* Détail d'une playlist (poussé). */}
         <Stack.Screen name="playlist" />
+        {/* Correction manuelle des métadonnées MusicBrainz (poussé). */}
+        <Stack.Screen name="metadata-fix" />
       </Stack.Protected>
 
       {/* Porte d'entrée quand la session est absente. */}

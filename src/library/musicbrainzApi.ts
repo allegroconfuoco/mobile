@@ -30,6 +30,29 @@ export type ResolvedMetadata = {
 const ACCEPT = { Accept: 'application/json' } as const;
 
 /**
+ * Aplati une piste MusicBrainz brute (DTO `MusicBrainzTrack`) en `ResolvedMetadata`, ou `null` si
+ * les champs garantis (mbid + titre) manquent. Partagé par `resolve` et `search`.
+ */
+function parseTrack(value: unknown): ResolvedMetadata | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const r = value as Record<string, unknown>;
+  // MBID + titre sont les seuls champs garantis non nuls côté DTO ; sans eux, on ignore.
+  if (typeof r.mbid !== 'string' || typeof r.title !== 'string') {
+    return null;
+  }
+  return {
+    mbid: r.mbid,
+    title: r.title,
+    artist: typeof r.artist === 'string' ? r.artist : null,
+    album: typeof r.album === 'string' ? r.album : null,
+    releaseGroupMbid: typeof r.releaseGroupMbid === 'string' ? r.releaseGroupMbid : null,
+    coverArtUrl: typeof r.coverArtUrl === 'string' ? r.coverArtUrl : null,
+  };
+}
+
+/**
  * Résout artiste + titre en métadonnées MusicBrainz via le proxy backend. Renvoie `null` si aucun
  * match. Lève `ApiError` (0 = réseau, 401 = session, 503 = MusicBrainz throttle/indispo, 5xx = proxy)
  * — le moteur d'enrichissement décide alors d'arrêter la passe et de réessayer plus tard.
@@ -60,21 +83,64 @@ export async function resolveMetadata(
     body = null;
   }
 
-  const result = (body as { result?: unknown } | null)?.result ?? null;
-  if (!result || typeof result !== 'object') {
-    return null;
+  return parseTrack((body as { result?: unknown } | null)?.result ?? null);
+}
+
+/**
+ * Recherche de candidats via le proxy de recherche backend — sert à l'UI de correction (#20) quand
+ * l'auto-match est faux ou absent. Contrairement à `resolve`, `search` accepte artiste **et/ou**
+ * titre (au moins un requis) et renvoie plusieurs pistes classées.
+ *
+ * Contrat : `GET /api/musicbrainz/search?artist=&title=&limit=` → `{ results: MusicBrainzTrack[] }`.
+ * Mêmes conventions d'erreur que `resolveMetadata` (`ApiError`, `status:0` = réseau). Une réponse
+ * sans résultat renvoie un tableau vide.
+ */
+export async function searchMetadata(
+  token: string,
+  params: { artist?: string; title?: string },
+  limit = 8
+): Promise<ResolvedMetadata[]> {
+  const query = new URLSearchParams();
+  const artist = params.artist?.trim();
+  const title = params.title?.trim();
+  if (artist) {
+    query.set('artist', artist);
   }
-  const r = result as Record<string, unknown>;
-  // MBID + titre sont les seuls champs garantis non nuls côté DTO ; sans eux, on ignore.
-  if (typeof r.mbid !== 'string' || typeof r.title !== 'string') {
-    return null;
+  if (title) {
+    query.set('title', title);
   }
-  return {
-    mbid: r.mbid,
-    title: r.title,
-    artist: typeof r.artist === 'string' ? r.artist : null,
-    album: typeof r.album === 'string' ? r.album : null,
-    releaseGroupMbid: typeof r.releaseGroupMbid === 'string' ? r.releaseGroupMbid : null,
-    coverArtUrl: typeof r.coverArtUrl === 'string' ? r.coverArtUrl : null,
-  };
+  query.set('limit', String(limit));
+
+  let response: Response;
+  try {
+    response = await fetch(apiUrl(`/api/musicbrainz/search?${query.toString()}`), {
+      headers: { ...ACCEPT, Authorization: `Bearer ${token}` },
+    });
+  } catch {
+    throw new ApiError(0, 'Impossible de joindre le serveur.');
+  }
+
+  if (!response.ok) {
+    throw new ApiError(response.status, `Échec de la recherche (${response.status}).`);
+  }
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
+
+  const results = (body as { results?: unknown } | null)?.results;
+  if (!Array.isArray(results)) {
+    return [];
+  }
+  const out: ResolvedMetadata[] = [];
+  for (const item of results) {
+    const parsed = parseTrack(item);
+    if (parsed) {
+      out.push(parsed);
+    }
+  }
+  return out;
 }
