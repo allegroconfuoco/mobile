@@ -101,6 +101,8 @@ function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
         <Stack.Screen name="playlist" />
         {/* Correction manuelle des métadonnées MusicBrainz (poussé). */}
         <Stack.Screen name="metadata-fix" />
+        {/* Identification d'album via une release MusicBrainz (ordre + pochette), poussé. */}
+        <Stack.Screen name="identify-album" />
       </Stack.Protected>
 
       {/* Porte d'entrée quand la session est absente. */}

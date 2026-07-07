@@ -144,3 +144,181 @@ export async function searchMetadata(
   }
   return out;
 }
+
+// --- Résolution release-level : identification d'album (issue #23, backend #14) --------------
+
+/** Un candidat release renvoyé par `/api/musicbrainz/album-candidates`. */
+export type ReleaseCandidate = {
+  mbid: string;
+  title: string;
+  artist: string | null;
+  year: number | null;
+  trackCount: number | null;
+  /** URL Cover Art Archive release-level *construite* (peut 404 : l'UI retombe sur un repli). */
+  coverArtUrl: string | null;
+  score: number | null;
+};
+
+/** Une piste d'une release résolue, dans l'ordre (disque + position). */
+export type ReleaseTrack = {
+  discNo: number;
+  position: number;
+  /** Numéro imprimé (« 1 », « A1 »…), conservé tel quel. */
+  number: string;
+  title: string;
+  lengthMs: number | null;
+  recordingMbid: string | null;
+};
+
+/** Une release résolue avec sa tracklist ordonnée. */
+export type Release = {
+  mbid: string;
+  title: string;
+  artist: string | null;
+  coverArtUrl: string | null;
+  tracks: ReleaseTrack[];
+};
+
+function str(v: unknown): string | null {
+  return typeof v === 'string' ? v : null;
+}
+
+function num(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
+function parseCandidate(value: unknown): ReleaseCandidate | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const r = value as Record<string, unknown>;
+  if (typeof r.mbid !== 'string') {
+    return null;
+  }
+  return {
+    mbid: r.mbid,
+    title: str(r.title) ?? '',
+    artist: str(r.artist),
+    year: num(r.year),
+    trackCount: num(r.trackCount),
+    coverArtUrl: str(r.coverArtUrl),
+    score: num(r.score),
+  };
+}
+
+function parseReleaseTrack(value: unknown): ReleaseTrack | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const r = value as Record<string, unknown>;
+  return {
+    discNo: num(r.discNo) ?? 1,
+    position: num(r.position) ?? 0,
+    number: str(r.number) ?? '',
+    title: str(r.title) ?? '',
+    lengthMs: num(r.lengthMs),
+    recordingMbid: str(r.recordingMbid),
+  };
+}
+
+/**
+ * Interroge les candidats release pour un album (`POST /api/musicbrainz/album-candidates`, backend
+ * #14). Le backend raisonne par *release* (album original / deluxe / compilation) et renvoie une
+ * liste classée. Mêmes conventions d'erreur que `resolveMetadata` (`ApiError`, `status:0` = réseau).
+ */
+export async function fetchAlbumCandidates(
+  token: string,
+  params: { albumArtist: string; album: string; trackCount?: number; trackTitles?: string[] }
+): Promise<ReleaseCandidate[]> {
+  let response: Response;
+  try {
+    response = await fetch(apiUrl('/api/musicbrainz/album-candidates'), {
+      method: 'POST',
+      headers: { ...ACCEPT, 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        albumArtist: params.albumArtist,
+        album: params.album,
+        trackCount: params.trackCount,
+        trackTitles: params.trackTitles,
+      }),
+    });
+  } catch {
+    throw new ApiError(0, 'Impossible de joindre le serveur.');
+  }
+
+  if (!response.ok) {
+    throw new ApiError(response.status, `Échec de la recherche d’album (${response.status}).`);
+  }
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
+
+  const candidates = (body as { candidates?: unknown } | null)?.candidates;
+  if (!Array.isArray(candidates)) {
+    return [];
+  }
+  const out: ReleaseCandidate[] = [];
+  for (const item of candidates) {
+    const parsed = parseCandidate(item);
+    if (parsed) {
+      out.push(parsed);
+    }
+  }
+  return out;
+}
+
+/**
+ * Récupère la tracklist ordonnée d'une release (`GET /api/musicbrainz/release/{mbid}`, backend #14).
+ * Renvoie `null` si le backend ne connaît pas la release (404). Mêmes conventions d'erreur que
+ * `resolveMetadata`.
+ */
+export async function fetchRelease(token: string, mbid: string): Promise<Release | null> {
+  let response: Response;
+  try {
+    response = await fetch(apiUrl(`/api/musicbrainz/release/${encodeURIComponent(mbid)}`), {
+      headers: { ...ACCEPT, Authorization: `Bearer ${token}` },
+    });
+  } catch {
+    throw new ApiError(0, 'Impossible de joindre le serveur.');
+  }
+
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new ApiError(response.status, `Échec du chargement de l’album (${response.status}).`);
+  }
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
+
+  const release = (body as { release?: unknown } | null)?.release;
+  if (!release || typeof release !== 'object') {
+    return null;
+  }
+  const r = release as Record<string, unknown>;
+  const tracks: ReleaseTrack[] = [];
+  if (Array.isArray(r.tracks)) {
+    for (const item of r.tracks) {
+      const parsed = parseReleaseTrack(item);
+      if (parsed) {
+        tracks.push(parsed);
+      }
+    }
+  }
+  return {
+    mbid: str(r.mbid) ?? mbid,
+    title: str(r.title) ?? '',
+    artist: str(r.artist),
+    coverArtUrl: str(r.coverArtUrl),
+    tracks,
+  };
+}

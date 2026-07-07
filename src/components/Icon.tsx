@@ -56,6 +56,9 @@ export type IconName =
   | 'check'
   | 'check_circle'
   | 'edit_note'
+  | 'travel_explore'
+  | 'warning'
+  | 'restart_alt'
   | 'logout';
 
 type IconProps = {

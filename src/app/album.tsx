@@ -1,10 +1,11 @@
 import { useMemo } from 'react';
-import { SectionList, StyleSheet, Text, View } from 'react-native';
+import { Pressable, SectionList, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
-import { colors, spacing, typography } from '@/theme';
+import { colors, radii, spacing, typography } from '@/theme';
 import { BackButton } from '@/components/BackButton';
+import { Icon } from '@/components/Icon';
 import { TrackCover } from '@/components/TrackCover';
 import { TrackRow } from '@/components/TrackRow';
 import {
@@ -48,10 +49,26 @@ export default function AlbumScreen() {
   // Première pochette disponible : tag local, sinon pochette d'enrichissement (issue #19).
   const cover = albumTracks.map((t) => t.artworkUri ?? t.coverArtUrl).find(Boolean) ?? null;
   const multiDisc = sections.length > 1;
+  // Ordre incertain si au moins une piste n'a pas de n° (tag TRCK manquant → tri alphabétique) :
+  // l'identification d'album (issue #23) le corrige via une release MusicBrainz.
+  const orderUncertain = albumTracks.some((t) => t.trackNo == null);
+
+  const identify = () => router.push({ pathname: '/identify-album', params: { artist, title } });
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + spacing.sm }]}>
-      <BackButton onPress={() => router.back()} />
+      <View style={styles.topBar}>
+        <BackButton onPress={() => router.back()} />
+        <Pressable
+          onPress={identify}
+          hitSlop={12}
+          style={styles.identifyButton}
+          accessibilityRole="button"
+          accessibilityLabel="Identifier l’album"
+        >
+          <Icon name="travel_explore" size={24} color={colors.textPrimary} />
+        </Pressable>
+      </View>
 
       <SectionList
         sections={sections}
@@ -69,6 +86,17 @@ export default function AlbumScreen() {
             <Text style={styles.count}>
               {albumTracks.length} {albumTracks.length > 1 ? 'titres' : 'titre'}
             </Text>
+            {orderUncertain && (
+              <Pressable
+                onPress={identify}
+                style={styles.badge}
+                accessibilityRole="button"
+                accessibilityLabel="Ordre incertain, identifier l’album"
+              >
+                <Icon name="warning" size={14} color={colors.accentLabel} />
+                <Text style={styles.badgeText}>Ordre incertain · identifier</Text>
+              </Pressable>
+            )}
           </View>
         }
         renderSectionHeader={({ section }) =>
@@ -95,6 +123,31 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  identifyButton: {
+    paddingHorizontal: spacing.xxl,
+    paddingVertical: spacing.sm,
+  },
+  badge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+  },
+  badgeText: {
+    ...typography.label,
+    fontSize: 10,
+    color: colors.accentLabel,
   },
   header: {
     alignItems: 'center',
