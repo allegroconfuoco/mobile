@@ -56,6 +56,11 @@ export default function AlbumScreen() {
   const orderUncertain = albumTracks.some((t) => t.trackNo == null);
 
   const identify = () => router.push({ pathname: '/identify-album', params: { artist, title } });
+  const editArtists = () =>
+    router.push({
+      pathname: '/edit-artists',
+      params: { scope: 'album', albumArtist: artist, album: title, label: title },
+    });
   const writeToFiles = () =>
     router.push({
       pathname: '/write-tags',
@@ -67,6 +72,15 @@ export default function AlbumScreen() {
       <View style={styles.topBar}>
         <BackButton onPress={() => router.back()} />
         <View style={styles.topActions}>
+          <Pressable
+            onPress={editArtists}
+            hitSlop={12}
+            style={styles.identifyButton}
+            accessibilityRole="button"
+            accessibilityLabel="Modifier les artistes de l’album"
+          >
+            <Icon name="group" size={24} color={colors.textPrimary} />
+          </Pressable>
           <Pressable
             onPress={writeToFiles}
             hitSlop={12}

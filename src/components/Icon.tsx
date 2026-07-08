@@ -52,6 +52,8 @@ export type IconName =
   | 'close'
   | 'sort'
   | 'person'
+  | 'group'
+  | 'person_remove'
   | 'album'
   | 'delete'
   | 'edit'

@@ -25,9 +25,36 @@ export function artistOf(track: LocalTrack): string {
   return track.artist?.trim() || UNKNOWN_ARTIST;
 }
 
-/** Artiste de l'album (TPE2, repli sur l'interprète) : regroupe les compilations. */
+/**
+ * Motif « featuring » à retirer pour dériver l'artiste d'album à partir d'un champ artiste brut.
+ *
+ * Deux formes : la parenthèse/crochet « (feat. X) », et la queue « feat. X … » jusqu'à la fin.
+ * **Volontairement conservateur** : on ne coupe QUE sur `feat/ft/featuring` (le motif dominant des
+ * fichiers téléchargés), jamais sur `,` / `&` / `/` — sinon on casserait des noms de groupe légitimes
+ * (« Earth, Wind & Fire », « Simon & Garfunkel », « AC/DC »). Les vrais multi-artistes séparés par
+ * une virgule se nettoient à la main via l'écran de suppression d'artiste (override réversible).
+ */
+const FEATURING =
+  /\s*[([]\s*(?:feat|ft|featuring)\.?\s+[^)\]]*[)\]]|\s+(?:feat|ft|featuring)\.?\s+.*$/gi;
+
+/** Retire les mentions de featuring d'un nom d'artiste, en gardant l'original si tout serait vidé. */
+export function stripFeaturing(name: string): string {
+  const cleaned = name.replace(FEATURING, '').trim();
+  return cleaned || name.trim();
+}
+
+/**
+ * Artiste de l'album (regroupement). Le tag TPE2 prime, sinon repli sur l'interprète (TPE1). Dans
+ * les deux cas on **retire le featuring** : ainsi « A » et « A feat. B » (même album, seul un titre
+ * a un guest) retombent sur le même artiste d'album et **ne scindent plus l'album**, y compris quand
+ * MusicBrainz ignore le featuring. L'interprète brut par piste reste affiché via `artistOf`.
+ */
 export function albumArtistOf(track: LocalTrack): string {
-  return track.albumArtist?.trim() || track.artist?.trim() || UNKNOWN_ARTIST;
+  const raw = track.albumArtist?.trim() || track.artist?.trim();
+  if (!raw) {
+    return UNKNOWN_ARTIST;
+  }
+  return stripFeaturing(raw);
 }
 
 /** Nom d'album affiché, avec repli. */

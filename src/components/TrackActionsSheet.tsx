@@ -26,6 +26,8 @@ export type TrackActionsSheetProps = {
   onFixMetadata: () => void;
   /** Ouvre l'écran de rattachement de ce titre seul à un album (release MusicBrainz). */
   onLinkAlbum: () => void;
+  /** Ouvre l'écran de suppression d'artiste(s) pour ce titre. Optionnel : n'apparaît que si fourni. */
+  onEditArtists?: () => void;
   /**
    * Grave les infos corrigées dans le fichier MP3 (write-back ID3). Optionnel : l'action n'apparaît
    * que si fourni.
@@ -52,6 +54,7 @@ export function TrackActionsSheet({
   onAddToPlaylist,
   onFixMetadata,
   onLinkAlbum,
+  onEditArtists,
   onWriteToFile,
   onRestoreFile,
   hasFileBackup = false,
@@ -87,6 +90,9 @@ export function TrackActionsSheet({
       />
       <Action icon="edit_note" label="Corriger les infos" onPress={run(onFixMetadata)} />
       <Action icon="travel_explore" label="Rattacher à un album" onPress={run(onLinkAlbum)} />
+      {onEditArtists && (
+        <Action icon="group" label="Modifier les artistes" onPress={run(onEditArtists)} />
+      )}
       {onWriteToFile && (
         <Action icon="save" label="Écrire dans le fichier" onPress={run(onWriteToFile)} />
       )}

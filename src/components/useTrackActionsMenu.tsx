@@ -51,6 +51,9 @@ export function useTrackActionsMenu(): {
           menuTrack &&
           router.push({ pathname: '/identify-album', params: { trackId: menuTrack.id } })
         }
+        onEditArtists={() =>
+          menuTrack && router.push({ pathname: '/edit-artists', params: { trackId: menuTrack.id } })
+        }
         onWriteToFile={() =>
           menuTrack && router.push({ pathname: '/write-tags', params: { trackId: menuTrack.id } })
         }
