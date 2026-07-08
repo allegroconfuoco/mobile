@@ -54,6 +54,8 @@ export type IconName =
   | 'person'
   | 'group'
   | 'person_remove'
+  | 'person_add'
+  | 'link_off'
   | 'album'
   | 'delete'
   | 'edit'
@@ -62,10 +64,12 @@ export type IconName =
   | 'check_circle'
   | 'edit_note'
   | 'travel_explore'
+  | 'auto_fix_high'
   | 'warning'
   | 'restart_alt'
   | 'save'
   | 'settings_backup_restore'
+  | 'delete_sweep'
   | 'logout';
 
 type IconProps = {

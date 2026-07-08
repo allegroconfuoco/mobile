@@ -57,6 +57,53 @@ function coversDirectory(): Directory {
   return dir;
 }
 
+/** Taille totale (octets) des pochettes en cache disque. 0 sur web ou si le dossier n'existe pas. */
+export function coverCacheSize(): number {
+  if (!isSupported) {
+    return 0;
+  }
+  try {
+    const dir = new Directory(Paths.cache, COVERS_DIR);
+    if (!dir.exists) {
+      return 0;
+    }
+    let total = 0;
+    for (const entry of dir.list()) {
+      if (entry instanceof File) {
+        total += entry.size ?? 0;
+      }
+    }
+    return total;
+  } catch (e) {
+    console.warn('[trackTags] taille du cache pochettes illisible', e);
+    return 0;
+  }
+}
+
+/**
+ * Vide le cache des pochettes : supprime le dossier disque et les caches mémoire (tags résolus).
+ * Purement dérivé des fichiers : les pochettes sont ré-extraites au prochain scan. Renvoie le
+ * nombre d'octets libérés (0 sur web).
+ */
+export function clearCoverCache(): number {
+  tagsCache.clear();
+  inFlight.clear();
+  if (!isSupported) {
+    return 0;
+  }
+  const freed = coverCacheSize();
+  try {
+    const dir = new Directory(Paths.cache, COVERS_DIR);
+    if (dir.exists) {
+      dir.delete();
+    }
+  } catch (e) {
+    console.warn('[trackTags] échec vidage du cache pochettes', e);
+    return 0;
+  }
+  return freed;
+}
+
 function extensionForMime(mime: string): string {
   if (mime === 'image/png') {
     return 'png';

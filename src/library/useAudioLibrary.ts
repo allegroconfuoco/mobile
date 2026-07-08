@@ -11,7 +11,7 @@ import {
 
 import * as db from './db';
 import { displayFolder, folderOf, isAutoExcluded } from './folders';
-import { extractTrackTags, type TrackTags } from './trackTags';
+import { clearCoverCache, extractTrackTags, type TrackTags } from './trackTags';
 import {
   buildAlbums,
   buildArtists,
@@ -235,6 +235,12 @@ type UseAudioLibrary = {
    * hors scan (enrichissement MusicBrainz, issue #19) dans l'état affiché.
    */
   reloadTracks: () => void;
+  /**
+   * Vide le cache (pochettes disque + pistes scannées) et relance un scan complet qui le
+   * reconstruit. Renvoie les octets de pochettes libérés. Ne touche à aucune donnée utilisateur
+   * (playlists, favoris, corrections MusicBrainz : tables séparées, conservées).
+   */
+  clearCache: () => Promise<number>;
   /** Inclut/exclut un dossier du scan. */
   setFolderIncluded: (folder: string, included: boolean) => void;
   /** Exclut/réinclut une piste individuelle. */
@@ -374,6 +380,17 @@ export function useAudioLibrary(): UseAudioLibrary {
   // Relecture SQLite pure (pas de scan) : source de vérité déjà à jour après une écriture hors scan.
   const reloadTracks = useCallback(() => setAllTracks(db.loadTracks()), []);
 
+  // Vide le cache (pochettes disque + table `tracks` dérivée) puis relance un scan complet qui le
+  // reconstruit. Renvoie les octets de pochettes libérés. Playlists/favoris/corrections préservés
+  // (tables séparées). Le scan re-résout tous les fichiers (`tracks` vide → tout est « nouveau »).
+  const clearCache = useCallback(async (): Promise<number> => {
+    const freed = clearCoverCache();
+    db.clearTrackCache();
+    setAllTracks([]);
+    await scan();
+    return freed;
+  }, [scan]);
+
   const setTrackExcluded = useCallback((id: string, excluded: boolean) => {
     db.setTrackExcluded(id, excluded);
     setExcludedIds((prev) => {
@@ -417,6 +434,7 @@ export function useAudioLibrary(): UseAudioLibrary {
     requestPermission: () => void requestPermission(),
     rescan: () => void scan(),
     reloadTracks,
+    clearCache,
     setFolderIncluded,
     setTrackExcluded,
   };

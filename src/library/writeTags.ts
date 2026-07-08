@@ -217,6 +217,46 @@ export async function graveTags(track: LocalTrack, spec?: WriteSpec): Promise<Wr
   return result;
 }
 
+/** Bilan d'une gravure en lot. `writtenIds` = pistes effectivement écrites (pour un nettoyage aval). */
+export type BulkGraveOutcome = {
+  written: number;
+  failed: number;
+  /** Vrai si on s'est arrêté sur un refus de permission (accès à tous les fichiers à accorder). */
+  permission: boolean;
+  writtenIds: string[];
+};
+
+/**
+ * Grave un lot de pistes, une par une (l'écriture fichier n'est pas parallélisable proprement), en
+ * s'arrêtant au **premier refus de permission** pour ne pas empiler N dialogues système. `onProgress`
+ * reçoit le nombre de pistes traitées. Mutualisé entre la revue avant gravure (`write-tags`) et les
+ * outils d'édition en lot (associer un artiste, dissocier des albums).
+ */
+export async function graveMany(
+  items: { track: LocalTrack; spec: WriteSpec }[],
+  onProgress?: (done: number) => void
+): Promise<BulkGraveOutcome> {
+  let written = 0;
+  let failed = 0;
+  let permission = false;
+  const writtenIds: string[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const { track, spec } = items[i];
+    const result = await graveTags(track, spec);
+    if (result === 'written') {
+      written += 1;
+      writtenIds.push(track.id);
+    } else if (result === 'permission-needed') {
+      permission = true;
+      break;
+    } else {
+      failed += 1;
+    }
+    onProgress?.(i + 1);
+  }
+  return { written, failed, permission, writtenIds };
+}
+
 /**
  * Restaure les tags d'origine d'une piste (sauvegardés avant sa première gravure) dans le fichier.
  * Ne restaure que les **tags texte** : la pochette éventuellement embarquée à la gravure est

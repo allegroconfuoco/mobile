@@ -80,7 +80,11 @@ export function defaultSource(base: TagBackup, mb: MbTags | null, key: FieldKey)
 }
 
 /** Prépare la revue d'une piste à partir de ses valeurs base (fichier) et MusicBrainz (overlay). */
-export function initTrackReview(track: LocalTrack, base: TagBackup, mb: MbTags | null): TrackReview {
+export function initTrackReview(
+  track: LocalTrack,
+  base: TagBackup,
+  mb: MbTags | null
+): TrackReview {
   const fields = {} as Record<FieldKey, FieldState>;
   for (const key of ALL_FIELDS) {
     fields[key] = { source: defaultSource(base, mb, key), manual: '' };
@@ -143,7 +147,11 @@ export function reviewToTags(review: TrackReview): TagBackup {
 }
 
 /** Change la source d'un champ (immuable). Sur passage en « perso », amorce la saisie avec l'actuel. */
-export function setFieldSource(review: TrackReview, key: FieldKey, source: FieldSource): TrackReview {
+export function setFieldSource(
+  review: TrackReview,
+  key: FieldKey,
+  source: FieldSource
+): TrackReview {
   const manual = source === 'manual' ? displayValue(review, key) : review.fields[key].manual;
   return {
     ...review,

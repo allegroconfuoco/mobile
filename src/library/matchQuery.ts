@@ -58,6 +58,13 @@ const NOISE_WORDS =
 const BRACKET_SEGMENT = /\s*[([{]([^()[\]{}]*)[)\]}]/g;
 
 /**
+ * Segment entre parenthèses ne contenant qu'une année (« (2019) », « [2024] », « (© 1998) ») :
+ * du bruit de téléchargement, jamais un vrai titre. `NOISE_WORDS` ne le couvre pas (pas de mot),
+ * d'où ce test dédié appliqué au contenu déjà extrait des parenthèses.
+ */
+const YEAR_ONLY = /^(?:©\s*)?(?:19|20)\d{2}$/;
+
+/**
  * Mention « feat./ft./featuring X » en fin de champ, parenthésée ou non. Les frontières de
  * mot sont indispensables : sans elles, « ft » matcherait au milieu de « Daft Punk ».
  */
@@ -69,7 +76,7 @@ const REMASTER_SUFFIX = /\s*[-–—]\s*(?:\d{4}\s+)?remaster(?:ed)?(?:\s+\d{4})
 /** Retire les segments parenthésés dont le contenu est du bruit connu. */
 function stripNoiseBrackets(value: string): string {
   return value.replace(BRACKET_SEGMENT, (segment, content: string) =>
-    NOISE_WORDS.test(content) ? '' : segment
+    NOISE_WORDS.test(content) || YEAR_ONLY.test(content.trim()) ? '' : segment
   );
 }
 

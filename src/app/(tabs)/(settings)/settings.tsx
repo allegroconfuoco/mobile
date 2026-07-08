@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { type Href, useRouter } from 'expo-router';
@@ -7,9 +7,21 @@ import { colors, radii, spacing, typography } from '@/theme';
 import { Icon, type IconName } from '@/components/Icon';
 import { useAuth } from '@/auth/AuthProvider';
 import { useLibrary } from '@/library/LibraryProvider';
+import { coverCacheSize } from '@/library/trackTags';
 import { useSync } from '@/sync/SyncProvider';
 
 type Row = { icon: IconName; label: string; hint: string; href?: Href };
+
+/** Formate une taille en octets en Ko / Mo lisibles. */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} o`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${Math.round(bytes / 1024)} Ko`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
+}
 
 /** Heure « à HH:MM » du dernier sync (jour même) ; sinon date courte. */
 function formatSyncedAt(ms: number): string {
@@ -23,9 +35,48 @@ function formatSyncedAt(ms: number): string {
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { folders, excludedTracks } = useLibrary();
+  const { folders, excludedTracks, clearCache } = useLibrary();
   const { signOut } = useAuth();
   const { status, lastSyncedAt, syncNow } = useSync();
+
+  // Taille du cache pochettes lue une fois au montage (initialiseur paresseux, pas de re-scan).
+  const [cacheSize, setCacheSize] = useState(() => coverCacheSize());
+  const [clearing, setClearing] = useState(false);
+
+  const cacheHint = clearing
+    ? 'Nettoyage en cours…'
+    : cacheSize > 0
+      ? `${formatBytes(cacheSize)} de pochettes en cache`
+      : 'Pochettes et métadonnées scannées';
+
+  const confirmClearCache = () => {
+    Alert.alert(
+      'Vider le cache',
+      'Supprime les pochettes et les métadonnées mises en cache, puis re-scanne la bibliothèque. Tes playlists, favoris et corrections sont conservés.',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Vider',
+          style: 'destructive',
+          onPress: () => {
+            setClearing(true);
+            void clearCache()
+              .then((freed) => {
+                setCacheSize(0);
+                Alert.alert(
+                  'Cache vidé',
+                  freed > 0
+                    ? `${formatBytes(freed)} libérés. La bibliothèque a été re-scannée.`
+                    : 'La bibliothèque a été re-scannée.'
+                );
+              })
+              .catch(() => Alert.alert('Échec', "Le vidage du cache n'a pas abouti."))
+              .finally(() => setClearing(false));
+          },
+        },
+      ]
+    );
+  };
 
   const libraryHint = useMemo(() => {
     if (folders.length === 0) {
@@ -52,6 +103,12 @@ export default function SettingsScreen() {
       label: 'Bibliothèque locale',
       hint: libraryHint,
       href: '/library-settings',
+    },
+    {
+      icon: 'edit_note',
+      label: 'Édition des fichiers',
+      hint: 'Associer un artiste, dissocier des albums',
+      href: '/file-editing',
     },
     {
       icon: 'queue_music',
@@ -116,6 +173,23 @@ export default function SettingsScreen() {
               {row.href && <Icon name="chevron_right" size={22} color={colors.textMuted} />}
             </Pressable>
           ))}
+        </View>
+
+        <View style={styles.list}>
+          <Pressable
+            onPress={confirmClearCache}
+            disabled={clearing}
+            style={({ pressed }) => [styles.row, pressed && !clearing ? styles.rowPressed : null]}
+            accessibilityRole="button"
+            accessibilityLabel="Vider le cache"
+            accessibilityState={{ disabled: clearing, busy: clearing }}
+          >
+            <Icon name="delete_sweep" size={24} color={colors.accentIcon} />
+            <View style={styles.rowText}>
+              <Text style={styles.rowLabel}>Vider le cache</Text>
+              <Text style={styles.rowHint}>{cacheHint}</Text>
+            </View>
+          </Pressable>
         </View>
 
         <View style={styles.list}>

@@ -74,8 +74,12 @@ export default function AlbumScreen() {
   // révèle ensuite les titres manquants en fantôme.
   const maxTrackNo = albumTracks.reduce((m, t) => Math.max(m, t.trackNo ?? 0), 0);
   const hasGaps = maxTrackNo > albumTracks.length;
+  // Bac « Album inconnu » d'un artiste connu : les titres viennent de plusieurs albums, un match
+  // release unique (identify) n'a pas de sens — on propose le multi-match qui range chaque titre.
+  const isUnknownBucket = title === UNKNOWN_ALBUM && artist !== UNKNOWN_ARTIST;
 
   const identify = () => router.push({ pathname: '/identify-album', params: { artist, title } });
+  const sortUnknown = () => router.push({ pathname: '/sort-unknown-album', params: { artist } });
   const editArtists = () =>
     router.push({
       pathname: '/edit-artists',
@@ -110,15 +114,27 @@ export default function AlbumScreen() {
           >
             <Icon name="save" size={24} color={colors.textPrimary} />
           </Pressable>
-          <Pressable
-            onPress={identify}
-            hitSlop={12}
-            style={styles.identifyButton}
-            accessibilityRole="button"
-            accessibilityLabel="Identifier l’album"
-          >
-            <Icon name="travel_explore" size={24} color={colors.textPrimary} />
-          </Pressable>
+          {isUnknownBucket ? (
+            <Pressable
+              onPress={sortUnknown}
+              hitSlop={12}
+              style={styles.identifyButton}
+              accessibilityRole="button"
+              accessibilityLabel="Ranger les titres via MusicBrainz"
+            >
+              <Icon name="auto_fix_high" size={24} color={colors.textPrimary} />
+            </Pressable>
+          ) : (
+            <Pressable
+              onPress={identify}
+              hitSlop={12}
+              style={styles.identifyButton}
+              accessibilityRole="button"
+              accessibilityLabel="Identifier l’album"
+            >
+              <Icon name="travel_explore" size={24} color={colors.textPrimary} />
+            </Pressable>
+          )}
         </View>
       </View>
 
@@ -141,16 +157,29 @@ export default function AlbumScreen() {
               {albumTracks.length} {albumTracks.length > 1 ? 'titres' : 'titre'}
               {ghostCount > 0 ? ` · ${ghostCount} manquant${ghostCount > 1 ? 's' : ''}` : ''}
             </Text>
-            {!identified && (orderUncertain || hasGaps) && (
+            {isUnknownBucket ? (
               <Pressable
-                onPress={identify}
+                onPress={sortUnknown}
                 style={styles.badge}
                 accessibilityRole="button"
-                accessibilityLabel="Identifier l’album pour voir les titres manquants"
+                accessibilityLabel="Ranger les titres dans leurs albums via MusicBrainz"
               >
-                <Icon name="travel_explore" size={14} color={colors.accentLabel} />
-                <Text style={styles.badgeText}>Identifier · voir les titres manquants</Text>
+                <Icon name="auto_fix_high" size={14} color={colors.accentLabel} />
+                <Text style={styles.badgeText}>Ranger les titres via MusicBrainz</Text>
               </Pressable>
+            ) : (
+              !identified &&
+              (orderUncertain || hasGaps) && (
+                <Pressable
+                  onPress={identify}
+                  style={styles.badge}
+                  accessibilityRole="button"
+                  accessibilityLabel="Identifier l’album pour voir les titres manquants"
+                >
+                  <Icon name="travel_explore" size={14} color={colors.accentLabel} />
+                  <Text style={styles.badgeText}>Identifier · voir les titres manquants</Text>
+                </Pressable>
+              )
             )}
           </View>
         }

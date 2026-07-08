@@ -43,7 +43,7 @@ import {
   setAllSources,
   type TrackReview,
 } from '@/library/writeReview';
-import { alertPermissionNeeded, graveTags, type WriteResult } from '@/library/writeTags';
+import { alertPermissionNeeded, graveMany, type WriteSpec } from '@/library/writeTags';
 import { colors, fontFamily, radii, spacing, typography } from '@/theme';
 
 type Params = {
@@ -102,7 +102,9 @@ export default function WriteTagsScreen() {
     const ids = targets.map((t) => t.id);
     const base = db.loadBaseTagsMany(ids);
     const mb = db.loadMbTagsMany(ids);
-    return targets.map((t) => initTrackReview(t, base.get(t.id) ?? EMPTY_BASE, mb.get(t.id) ?? null));
+    return targets.map((t) =>
+      initTrackReview(t, base.get(t.id) ?? EMPTY_BASE, mb.get(t.id) ?? null)
+    );
   });
 
   // Carte dépliée en mode lot (une seule à la fois), ou null.
@@ -126,48 +128,37 @@ export default function WriteTagsScreen() {
     }
     setWriting(true);
     setProgress(0);
-    let written = 0;
-    let failed = 0;
-    let permission = false;
 
-    for (let i = 0; i < reviews.length; i++) {
-      const r = reviews[i];
+    // Pistes disparues entre le montage et la gravure (rare) : comptées en échec.
+    const items: { track: LocalTrack; spec: WriteSpec }[] = [];
+    for (const r of reviews) {
       const track = targetsById.get(r.trackId);
-      if (!track) {
-        failed += 1;
-        continue;
+      if (track) {
+        items.push({ track, spec: { tags: reviewToTags(r), cover: r.cover } });
       }
-      const result: WriteResult = await graveTags(track, {
-        tags: reviewToTags(r),
-        cover: r.cover,
-      });
-      if (result === 'written') {
-        written += 1;
-      } else if (result === 'permission-needed') {
-        // On stoppe au premier refus : inutile d'empiler N dialogues système.
-        permission = true;
-        break;
-      } else {
-        failed += 1;
-      }
-      setProgress(i + 1);
     }
+    const missing = reviews.length - items.length;
+
+    const outcome = await graveMany(items, setProgress);
 
     setWriting(false);
     reloadTracks();
 
-    if (permission) {
+    if (outcome.permission) {
       alertPermissionNeeded('Relance ensuite l’écriture.');
       return;
     }
+    const failed = outcome.failed + missing;
     if (failed === 0) {
       Alert.alert(
         'Fichiers mis à jour',
-        written > 1 ? `${written} pistes écrites.` : 'Les infos ont été écrites dans le fichier.'
+        outcome.written > 1
+          ? `${outcome.written} pistes écrites.`
+          : 'Les infos ont été écrites dans le fichier.'
       );
       router.back();
     } else {
-      Alert.alert('Écriture partielle', `${written} écrite(s), ${failed} en échec.`);
+      Alert.alert('Écriture partielle', `${outcome.written} écrite(s), ${failed} en échec.`);
     }
   };
 
