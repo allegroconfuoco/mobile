@@ -399,6 +399,9 @@ export default function NowPlayingScreen() {
         onFixMetadata={() =>
           local && router.push({ pathname: '/metadata-fix', params: { trackId: local.id } })
         }
+        onLinkAlbum={() =>
+          local && router.push({ pathname: '/identify-album', params: { trackId: local.id } })
+        }
         onExclude={() => local && setTrackExcluded(local.id, true)}
       />
 

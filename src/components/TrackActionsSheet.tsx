@@ -24,6 +24,8 @@ export type TrackActionsSheetProps = {
   onAddToPlaylist: () => void;
   /** Ouvre l'écran de correction des métadonnées (valider / corriger le match MusicBrainz). */
   onFixMetadata: () => void;
+  /** Ouvre l'écran de rattachement de ce titre seul à un album (release MusicBrainz). */
+  onLinkAlbum: () => void;
   /** Exclut la piste de la bibliothèque (et des scans suivants). */
   onExclude: () => void;
 };
@@ -37,6 +39,7 @@ export function TrackActionsSheet({
   onToggleFavorite,
   onAddToPlaylist,
   onFixMetadata,
+  onLinkAlbum,
   onExclude,
 }: TrackActionsSheetProps) {
   const visible = title !== null;
@@ -68,6 +71,7 @@ export function TrackActionsSheet({
         onPress={run(onAddToPlaylist)}
       />
       <Action icon="edit_note" label="Corriger les infos" onPress={run(onFixMetadata)} />
+      <Action icon="travel_explore" label="Rattacher à un album" onPress={run(onLinkAlbum)} />
       <Action icon="block" label="Exclure de la bibliothèque" onPress={run(onExclude)} />
     </BottomSheet>
   );

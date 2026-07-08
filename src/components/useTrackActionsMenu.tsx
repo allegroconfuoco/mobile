@@ -45,6 +45,10 @@ export function useTrackActionsMenu(): {
         onFixMetadata={() =>
           menuTrack && router.push({ pathname: '/metadata-fix', params: { trackId: menuTrack.id } })
         }
+        onLinkAlbum={() =>
+          menuTrack &&
+          router.push({ pathname: '/identify-album', params: { trackId: menuTrack.id } })
+        }
         onExclude={() => menuTrack && setTrackExcluded(menuTrack.id, true)}
       />
 

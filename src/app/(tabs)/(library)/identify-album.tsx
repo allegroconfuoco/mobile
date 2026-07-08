@@ -16,8 +16,10 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { colors, radii, spacing, typography } from '@/theme';
 import { Icon } from '@/components/Icon';
 import { TrackCover } from '@/components/TrackCover';
+import { BottomSheet } from '@/components/BottomSheet';
 import { useAuth } from '@/auth/AuthProvider';
 import { useLibrary } from '@/library/LibraryProvider';
+import type { LocalTrack } from '@/library/useAudioLibrary';
 import * as db from '@/library/db';
 import { ApiError } from '@/api/auth';
 import {
@@ -26,8 +28,14 @@ import {
   type Release,
   type ReleaseCandidate,
 } from '@/library/musicbrainzApi';
-import { matchReleaseTracks, type ReleaseMapping } from '@/library/albumMatch';
-import { makeAlbumKey, tracksForAlbum, UNKNOWN_ALBUM, UNKNOWN_ARTIST } from '@/library/grouping';
+import { matchReleaseTracks, reassignMapping, type ReleaseMapping } from '@/library/albumMatch';
+import {
+  makeAlbumKey,
+  normalizeForSearch,
+  tracksForAlbum,
+  UNKNOWN_ALBUM,
+  UNKNOWN_ARTIST,
+} from '@/library/grouping';
 
 /**
  * Identification d'album via une release MusicBrainz (issue #23) — flow façon Picard, in-app.
@@ -43,26 +51,46 @@ import { makeAlbumKey, tracksForAlbum, UNKNOWN_ALBUM, UNKNOWN_ARTIST } from '@/l
 export default function IdentifyAlbumScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const params = useLocalSearchParams<{ artist?: string; title?: string }>();
-  const artist = params.artist ?? UNKNOWN_ARTIST;
-  const title = params.title ?? UNKNOWN_ALBUM;
+  const params = useLocalSearchParams<{ artist?: string; title?: string; trackId?: string }>();
+  // Deux modes. Album : identification d'un album local déjà regroupé (params artist+title). Titre
+  // seul : rattachement d'UN titre à un album (param trackId) — le fichier peut être mal ou pas
+  // taggé, on part alors de la piste elle-même, pas d'une clé d'album (qui serait fausse).
+  const singleTrackId = params.trackId ?? null;
+  const singleTrack = singleTrackId !== null;
+  const albumKeyArtist = params.artist ?? UNKNOWN_ARTIST;
+  const albumKeyTitle = params.title ?? UNKNOWN_ALBUM;
 
   const { tracks, reloadTracks } = useLibrary();
   const { getAccessToken } = useAuth();
 
   const albumTracks = useMemo(
-    () => tracksForAlbum(tracks, makeAlbumKey(artist, title)),
-    [tracks, artist, title]
+    () =>
+      singleTrack
+        ? tracks.filter((t) => t.id === singleTrackId)
+        : tracksForAlbum(tracks, makeAlbumKey(albumKeyArtist, albumKeyTitle)),
+    [tracks, singleTrack, singleTrackId, albumKeyArtist, albumKeyTitle]
   );
   const trackIds = useMemo(() => albumTracks.map((t) => t.id), [albumTracks]);
+
+  // En-tête : le titre à rattacher (mode titre seul) ou le nom de l'album visé (mode album).
+  const focusTrack = singleTrack ? (albumTracks[0] ?? null) : null;
+  const headerTitle = singleTrack ? (focusTrack?.title ?? '…') : albumKeyTitle;
+  const headerArtist = singleTrack ? (focusTrack?.artist ?? UNKNOWN_ARTIST) : albumKeyArtist;
 
   // Album déjà identifié ? (au moins un overlay release sur ses pistes) → propose la réinitialisation.
   const alreadyIdentified = useMemo(() => db.countReleaseOverlays(trackIds) > 0, [trackIds]);
 
   // Termes de recherche éditables (préremplis depuis les tags) : les tags d'un album peuvent être
   // approximatifs, l'utilisateur doit pouvoir rectifier et relancer.
-  const [albumInput, setAlbumInput] = useState(title);
-  const [artistInput, setArtistInput] = useState(artist);
+  // En mode titre seul, on ne pré-remplit l'album que s'il paraît fiable : un tag album absent ou
+  // égal au titre (le cas faux le plus courant) amorcerait la recherche release sur une mauvaise
+  // piste. L'artiste, lui, est fiable et sert de socle à la recherche par artiste.
+  const [albumInput, setAlbumInput] = useState(() =>
+    singleTrack ? guessAlbumInput(focusTrack) : albumKeyTitle
+  );
+  const [artistInput, setArtistInput] = useState(() =>
+    singleTrack ? (focusTrack?.artist ?? '') : albumKeyArtist
+  );
 
   const [candidates, setCandidates] = useState<ReleaseCandidate[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -72,6 +100,9 @@ export default function IdentifyAlbumScreen() {
   const [release, setRelease] = useState<Release | null>(null);
   const [mapping, setMapping] = useState<ReleaseMapping[] | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Index de la piste de release dont on corrige le fichier local à la main (feuille de choix).
+  const [pickerFor, setPickerFor] = useState<number | null>(null);
 
   const loadCandidates = useCallback(async () => {
     const album = albumInput.trim();
@@ -89,13 +120,19 @@ export default function IdentifyAlbumScreen() {
         setError('Session expirée : reconnecte-toi pour identifier l’album.');
         return;
       }
-      // Le compte/les titres locaux affinent la recherche (le backend tente le compte exact puis
-      // relâche) sans dépendre des termes édités, qui ne changent que la requête, pas l'album ciblé.
+      // Mode album : le compte de pistes locales affine la recherche (le backend tente le compte
+      // exact `tracks:N` puis relâche si zéro résultat) — bon signal quand l'album local est complet.
+      // Mode titre seul : on l'omet **volontairement**. On cherche l'album qui *contient* ce titre
+      // (8, 12 pistes…), pas une release d'1 titre ; envoyer `trackCount=1` ferait remonter les
+      // singles (`tracks:1` renvoie des résultats, donc le repli sans compte ne se déclenche jamais)
+      // et masquerait le vrai album. On n'envoie pas non plus les titres, dont le backend redérive
+      // le compte.
       const found = await fetchAlbumCandidates(token, {
         albumArtist,
         album,
-        trackCount: albumTracks.length,
-        trackTitles: albumTracks.map((t) => t.title),
+        ...(singleTrack
+          ? {}
+          : { trackCount: albumTracks.length, trackTitles: albumTracks.map((t) => t.title) }),
       });
       setCandidates(found);
     } catch (e) {
@@ -103,7 +140,7 @@ export default function IdentifyAlbumScreen() {
     } finally {
       setLoading(false);
     }
-  }, [albumInput, artistInput, getAccessToken, albumTracks]);
+  }, [albumInput, artistInput, getAccessToken, albumTracks, singleTrack]);
 
   // Recherche automatique au montage (l'utilisateur a déjà exprimé son intention en ouvrant l'écran).
   const started = useRef(false);
@@ -166,6 +203,19 @@ export default function IdentifyAlbumScreen() {
     router.back();
   }, [release, mapping, reloadTracks, router]);
 
+  // Correction manuelle : associe (ou libère, `local = null`) le fichier local de la piste de
+  // release ciblée par la feuille. `reassignMapping` maintient le 1-à-1 (le fichier choisi est
+  // retiré de la piste où il était éventuellement déjà posé).
+  const assignLocal = useCallback(
+    (local: LocalTrack | null) => {
+      setMapping((prev) =>
+        prev && pickerFor !== null ? reassignMapping(prev, pickerFor, local) : prev
+      );
+      setPickerFor(null);
+    },
+    [pickerFor]
+  );
+
   const resetIdentification = useCallback(() => {
     db.resetAlbumOverlay(trackIds);
     reloadTracks();
@@ -184,6 +234,26 @@ export default function IdentifyAlbumScreen() {
   );
   const matchedCount = mapping ? mapping.filter((m) => m.local).length : 0;
 
+  const positionLabel = useCallback(
+    (m: ReleaseMapping) =>
+      multiDisc ? `${m.release.discNo}-${m.release.position}` : m.release.position,
+    [multiDisc]
+  );
+
+  // Fichier local → index de la piste de release à laquelle il est associé (pour signaler, dans la
+  // feuille de choix, qu'un fichier est déjà pris ailleurs).
+  const localAssignment = useMemo(() => {
+    const map = new Map<string, number>();
+    mapping?.forEach((m, i) => {
+      if (m.local) {
+        map.set(m.local.id, i);
+      }
+    });
+    return map;
+  }, [mapping]);
+
+  const pickerRelease = pickerFor !== null && mapping ? mapping[pickerFor] : null;
+
   return (
     <View style={styles.screen}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.md }]}>
@@ -196,7 +266,7 @@ export default function IdentifyAlbumScreen() {
           <Icon name="arrow_back" size={26} color={colors.textPrimary} />
         </Pressable>
         <Text style={styles.title} numberOfLines={1}>
-          {release ? 'Valider l’album' : 'Identifier l’album'}
+          {release ? 'Valider' : singleTrack ? 'Rattacher à un album' : 'Identifier l’album'}
         </Text>
       </View>
 
@@ -212,10 +282,12 @@ export default function IdentifyAlbumScreen() {
           {/* Album local visé. */}
           <View style={styles.albumCard}>
             <Text style={styles.albumTitle} numberOfLines={1}>
-              {title}
+              {headerTitle}
             </Text>
             <Text style={styles.albumMeta} numberOfLines={1}>
-              {artist} · {albumTracks.length} {albumTracks.length > 1 ? 'titres' : 'titre'}
+              {singleTrack
+                ? headerArtist
+                : `${headerArtist} · ${albumTracks.length} ${albumTracks.length > 1 ? 'titres' : 'titre'}`}
             </Text>
           </View>
 
@@ -240,15 +312,17 @@ export default function IdentifyAlbumScreen() {
                 </View>
               </View>
 
+              <Text style={styles.mapHint}>Touche une ligne pour corriger le fichier associé.</Text>
               <View style={styles.list}>
                 {mapping.map((m, i) => (
-                  <View
+                  <Pressable
                     key={`${m.release.discNo}-${m.release.position}-${i}`}
-                    style={styles.mapRow}
+                    onPress={() => setPickerFor(i)}
+                    style={({ pressed }) => [styles.mapRow, pressed && styles.rowPressed]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Corriger le fichier de ${m.release.title}`}
                   >
-                    <Text style={styles.posLabel}>
-                      {multiDisc ? `${m.release.discNo}-${m.release.position}` : m.release.position}
-                    </Text>
+                    <Text style={styles.posLabel}>{positionLabel(m)}</Text>
                     <View style={styles.mapText}>
                       <Text style={styles.mapReleaseTitle} numberOfLines={1}>
                         {m.release.title}
@@ -264,7 +338,8 @@ export default function IdentifyAlbumScreen() {
                         </View>
                       )}
                     </View>
-                  </View>
+                    <Icon name="edit" size={18} color={colors.textMuted} />
+                  </Pressable>
                 ))}
               </View>
 
@@ -387,12 +462,85 @@ export default function IdentifyAlbumScreen() {
           )}
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Feuille de correction manuelle : choisir quel fichier local correspond à cette piste. */}
+      <BottomSheet visible={pickerFor !== null} onClose={() => setPickerFor(null)}>
+        <Text style={styles.sheetHeader} numberOfLines={2}>
+          {pickerRelease ? pickerRelease.release.title : 'Associer un fichier'}
+        </Text>
+
+        <Pressable
+          onPress={() => assignLocal(null)}
+          style={({ pressed }) => [styles.sheetRow, pressed && styles.rowPressed]}
+          accessibilityRole="button"
+          accessibilityLabel="Aucun fichier local"
+        >
+          <Icon
+            name={pickerRelease && !pickerRelease.local ? 'check' : 'block'}
+            size={20}
+            color={pickerRelease && !pickerRelease.local ? colors.accentIcon : colors.textMuted}
+          />
+          <Text style={styles.sheetRowLabel}>Aucun (piste manquante)</Text>
+        </Pressable>
+
+        <ScrollView style={styles.sheetList} showsVerticalScrollIndicator={false}>
+          {albumTracks.map((lt) => {
+            const assignedIdx = localAssignment.get(lt.id);
+            const isCurrent = assignedIdx === pickerFor;
+            const elsewhere =
+              assignedIdx !== undefined && assignedIdx !== pickerFor && mapping
+                ? positionLabel(mapping[assignedIdx])
+                : null;
+            return (
+              <Pressable
+                key={lt.id}
+                onPress={() => assignLocal(lt)}
+                style={({ pressed }) => [styles.sheetRow, pressed && styles.rowPressed]}
+                accessibilityRole="button"
+                accessibilityLabel={`Associer ${lt.title}`}
+              >
+                <Icon
+                  name={isCurrent ? 'check' : 'music_note'}
+                  size={20}
+                  color={isCurrent ? colors.accentIcon : colors.textSecondary}
+                />
+                <View style={styles.sheetRowText}>
+                  <Text style={styles.sheetRowLabel} numberOfLines={1}>
+                    {lt.title}
+                  </Text>
+                  <Text style={styles.sheetRowHint} numberOfLines={1}>
+                    {lt.filename}
+                  </Text>
+                </View>
+                {elsewhere != null && (
+                  <Text style={styles.sheetTaken} numberOfLines={1}>
+                    Piste {elsewhere}
+                  </Text>
+                )}
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </BottomSheet>
     </View>
   );
 }
 
 function trackCountLabel(count: number | null): string | null {
   return count != null ? `${count} titres` : null;
+}
+
+/**
+ * Album à pré-remplir pour le rattachement d'un titre seul : le tag album du fichier s'il paraît
+ * fiable, sinon rien. Un tag absent, ou égal au titre (le cas faux courant « album = titre
+ * répété »), ne doit pas amorcer la recherche release sur une mauvaise piste.
+ */
+function guessAlbumInput(track: LocalTrack | null): string {
+  const album = track?.album?.trim();
+  if (!album) {
+    return '';
+  }
+  return normalizeForSearch(album) === normalizeForSearch(track?.title ?? '') ? '' : album;
 }
 
 const styles = StyleSheet.create({
@@ -622,5 +770,49 @@ const styles = StyleSheet.create({
     ...typography.body,
     fontSize: 13,
     color: colors.textSecondary,
+  },
+  mapHint: {
+    ...typography.body,
+    fontSize: 12,
+    color: colors.textMuted,
+    paddingHorizontal: spacing.xxl,
+    paddingBottom: spacing.sm,
+  },
+  sheetHeader: {
+    ...typography.heading,
+    fontSize: 15,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
+  },
+  sheetList: {
+    // Borne la hauteur : au-delà, la liste des fichiers défile dans la feuille.
+    maxHeight: 360,
+  },
+  sheetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderRadius: radii.sm,
+  },
+  sheetRowText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  sheetRowLabel: {
+    ...typography.heading,
+    fontSize: 15,
+  },
+  sheetRowHint: {
+    ...typography.body,
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  sheetTaken: {
+    ...typography.label,
+    fontSize: 10,
+    color: colors.textMuted,
   },
 });

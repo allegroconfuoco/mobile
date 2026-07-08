@@ -103,3 +103,31 @@ export function matchReleaseTracks(
     score: scoreFor[r],
   }));
 }
+
+/** Score attribué à un match posé à la main : confiance maximale, c'est un choix humain. */
+const MANUAL_SCORE = 1;
+
+/**
+ * Réassigne à la main le fichier local d'une piste de release (correction ponctuelle quand
+ * l'auto-match rate un titre, ex. « sams base » ↔ « Sam's Base »). Maintient l'invariant **1-à-1**
+ * du matcher : si `local` était déjà associé à une autre piste de release, cette autre entrée est
+ * libérée (`local: null`). `local = null` marque explicitement la piste comme manquante localement.
+ * Fonction pure : renvoie un nouveau tableau, n'altère pas `mapping`.
+ */
+export function reassignMapping(
+  mapping: ReleaseMapping[],
+  releaseIndex: number,
+  local: LocalTrack | null
+): ReleaseMapping[] {
+  return mapping.map((m, i) => {
+    if (i === releaseIndex) {
+      return { ...m, local, score: local ? MANUAL_SCORE : 0 };
+    }
+    // Le fichier choisi ne peut rester associé qu'à une seule piste de release : on le retire
+    // d'où il était (le cas échéant), sinon on aurait deux pistes pointant le même fichier.
+    if (local && m.local?.id === local.id) {
+      return { ...m, local: null, score: 0 };
+    }
+    return m;
+  });
+}

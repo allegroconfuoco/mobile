@@ -99,6 +99,19 @@ function stripExtension(name: string): string {
   return dot > 0 ? name.slice(0, dot) : name;
 }
 
+/**
+ * Un fichier déjà connu doit être re-résolu (getUri + tags) si son **nom** ou sa **date de modif**
+ * diffère du cache : signal d'un renommage « de propreté » ou d'une réécriture (ré-encodage/ré-tag).
+ * Sans ça, le diff par id sautait ces fichiers et gardait un nom/tags périmés. L'id media-store
+ * étant conservé au renommage, la ligne `tracks` est réécrite mais l'enrichissement MusicBrainz
+ * (table séparée `track_enrichment`, clé = id) reste intact. Le nom se compare avec le même repli
+ * que `toRow` pour ne pas déclencher un faux positif sur un media store sans nom de fichier.
+ */
+function fileChanged(prev: db.TrackRow, meta: AssetMetadata): boolean {
+  const nextFilename = meta.filename ?? 'Fichier inconnu';
+  return prev.filename !== nextFilename || prev.modificationTime !== meta.modificationTime;
+}
+
 function toRow(
   meta: AssetMetadata,
   folder: string,
@@ -265,24 +278,28 @@ export function useAudioLibrary(): UseAudioLibrary {
         .orderBy({ key: AssetField.MODIFICATION_TIME, ascending: false })
         .exeForMetadata();
 
-      // Diff par id contre la base : on ne re-résout (getUri) que les nouveaux fichiers.
-      const known = new Set(db.loadTracks().map((t) => t.id));
+      // Diff par id contre la base : on re-résout (getUri + tags) les fichiers *nouveaux*, mais
+      // aussi ceux dont le nom ou la date de modif a changé (renommage, ré-encodage, ré-tag) — leur
+      // ligne `tracks` est réécrite pour refléter le fichier réel, l'enrichissement (table séparée,
+      // clé = id conservé) restant intact.
+      const knownById = new Map(db.loadTracks().map((t) => [t.id, t]));
       const seen = new Set<string>();
-      const fresh: AssetMetadata[] = [];
+      const toResolve: AssetMetadata[] = [];
       for (const meta of results) {
         seen.add(meta.id);
-        if (!known.has(meta.id)) {
-          fresh.push(meta);
+        const prev = knownById.get(meta.id);
+        if (!prev || fileChanged(prev, meta)) {
+          toResolve.push(meta);
         }
       }
 
-      const newRows = await resolveRows(fresh);
+      const newRows = await resolveRows(toResolve);
       for (const row of newRows) {
         db.ensureFolderPref(row.folder, !isAutoExcluded(row.folder));
       }
       db.upsertTracks(newRows);
 
-      const removed = [...known].filter((id) => !seen.has(id));
+      const removed = [...knownById.keys()].filter((id) => !seen.has(id));
       db.deleteTracks(removed);
 
       // Re-synchronise l'état en mémoire depuis la base (source de vérité).
