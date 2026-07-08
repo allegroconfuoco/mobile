@@ -8,6 +8,7 @@ import { BackButton } from '@/components/BackButton';
 import { Icon } from '@/components/Icon';
 import { TrackCover } from '@/components/TrackCover';
 import { TrackRow } from '@/components/TrackRow';
+import { useTrackActionsMenu } from '@/components/useTrackActionsMenu';
 import {
   groupAlbumByDisc,
   makeAlbumKey,
@@ -37,6 +38,7 @@ export default function AlbumScreen() {
   const { tracks } = useLibrary();
   const { playQueue } = usePlayer();
   const { track: activeTrack } = usePlayback();
+  const trackMenu = useTrackActionsMenu();
 
   // File de lecture à plat + sections par disque + index global d'une piste, dérivés ensemble.
   const { albumTracks, sections, indexById } = useMemo(() => {
@@ -109,12 +111,15 @@ export default function AlbumScreen() {
             leadingNumber={item.trackNo ?? index + 1}
             subtitle={item.artist ?? UNKNOWN_ARTIST}
             onPress={() => void playQueue(albumTracks, indexById.get(item.id) ?? 0)}
+            onLongPress={() => trackMenu.open(item)}
           />
         )}
         ListEmptyComponent={<Text style={styles.empty}>Album introuvable.</Text>}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
       />
+
+      {trackMenu.element}
     </View>
   );
 }

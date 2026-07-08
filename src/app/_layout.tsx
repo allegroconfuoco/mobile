@@ -93,28 +93,16 @@ function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
         contentStyle: { backgroundColor: colors.background },
       }}
     >
-      {/* Écrans accessibles une fois connecté. */}
+      {/* Écrans accessibles une fois connecté. Les écrans de détail (artiste, album, playlist,
+          favoris, réglages…) vivent désormais DANS les stacks d'onglet (cf. (tabs)/(library) et
+          (tabs)/(settings)) pour garder la tab bar + le mini-player visibles. Seuls restent au
+          niveau racine les modaux, qui doivent couvrir toute l'UI, barre comprise. */}
       <Stack.Protected guard={isAuthenticated}>
         <Stack.Screen name="(tabs)" />
         {/* Écran Lecture présenté en modal, au-dessus de la tab bar. */}
         <Stack.Screen name="now-playing" options={{ presentation: 'modal' }} />
         {/* File d'attente, également en modal. */}
         <Stack.Screen name="queue" options={{ presentation: 'modal' }} />
-        {/* Réglages > Bibliothèque locale (dossiers scannés / exclusions). */}
-        <Stack.Screen name="library-settings" />
-        {/* Réglages > Lecture (répétition / lecture aléatoire par défaut). */}
-        <Stack.Screen name="playback-settings" />
-        {/* Favoris (morceaux likés), poussé. */}
-        <Stack.Screen name="favorites" />
-        {/* Détails Bibliothèque (poussés) : morceaux d'un artiste / pistes d'un album. */}
-        <Stack.Screen name="artist" />
-        <Stack.Screen name="album" />
-        {/* Détail d'une playlist (poussé). */}
-        <Stack.Screen name="playlist" />
-        {/* Correction manuelle des métadonnées MusicBrainz (poussé). */}
-        <Stack.Screen name="metadata-fix" />
-        {/* Identification d'album via une release MusicBrainz (ordre + pochette), poussé. */}
-        <Stack.Screen name="identify-album" />
       </Stack.Protected>
 
       {/* Porte d'entrée quand la session est absente. */}

@@ -15,8 +15,7 @@ import { colors, spacing, typography } from '@/theme';
 import { Icon, type IconName } from '@/components/Icon';
 import { SearchBar } from '@/components/SearchBar';
 import { SegmentedControl, type Segment } from '@/components/SegmentedControl';
-import { TrackActionsSheet } from '@/components/TrackActionsSheet';
-import { PlaylistPickerSheet } from '@/components/PlaylistPickerSheet';
+import { useTrackActionsMenu } from '@/components/useTrackActionsMenu';
 import { PlaylistNameDialog } from '@/components/PlaylistNameDialog';
 import { TrackCover } from '@/components/TrackCover';
 import { TrackRow } from '@/components/TrackRow';
@@ -121,15 +120,12 @@ function LibraryContent({
   query: string;
   library: LibraryContextValue;
 }) {
-  const { tracks, artists, albums, trackSort, setTrackSort, setTrackExcluded } = library;
+  const { tracks, artists, albums, trackSort, setTrackSort } = library;
   const router = useRouter();
-  const { playQueue, playNext, addToQueue } = usePlayer();
-  const { isFavorite, toggleFavorite } = useFavorites();
+  const { playQueue } = usePlayer();
   const { track: activeTrack } = usePlayback();
-  // Piste dont le menu d'actions (long-press) est ouvert, ou `null` si fermé.
-  const [menuTrack, setMenuTrack] = useState<LocalTrack | null>(null);
-  // Piste pour laquelle le sélecteur « Ajouter à une playlist » est ouvert, ou `null`.
-  const [pickerTrack, setPickerTrack] = useState<LocalTrack | null>(null);
+  // Menu d'actions (long-press) mutualisé : ouverture + feuilles rendues via `trackMenu.element`.
+  const trackMenu = useTrackActionsMenu();
 
   // Résultats filtrés par la recherche (temps réel). Requête vide = listes complètes.
   const filteredTracks = useMemo(() => filterTracks(tracks, query), [tracks, query]);
@@ -147,7 +143,7 @@ function LibraryContent({
           onToggleSort={() => setTrackSort(trackSort === 'title' ? 'artist' : 'title')}
           // La file de lecture reprend exactement la liste filtrée affichée.
           onPlay={(index) => void playQueue(filteredTracks, index)}
-          onLongPress={setMenuTrack}
+          onLongPress={trackMenu.open}
         />
       )}
       {view === 'artists' && (
@@ -171,21 +167,7 @@ function LibraryContent({
       )}
       {view === 'playlists' && <PlaylistsView query={query} />}
 
-      <TrackActionsSheet
-        title={menuTrack?.title ?? null}
-        isFavorite={menuTrack ? isFavorite(menuTrack.id) : false}
-        onClose={() => setMenuTrack(null)}
-        onPlayNext={() => menuTrack && void playNext([menuTrack])}
-        onAddToQueue={() => menuTrack && void addToQueue([menuTrack])}
-        onToggleFavorite={() => menuTrack && toggleFavorite(menuTrack.id, menuTrack.mbid)}
-        onAddToPlaylist={() => setPickerTrack(menuTrack)}
-        onFixMetadata={() =>
-          menuTrack && router.push({ pathname: '/metadata-fix', params: { trackId: menuTrack.id } })
-        }
-        onExclude={() => menuTrack && setTrackExcluded(menuTrack.id, true)}
-      />
-
-      <PlaylistPickerSheet track={pickerTrack} onClose={() => setPickerTrack(null)} />
+      {trackMenu.element}
     </>
   );
 }

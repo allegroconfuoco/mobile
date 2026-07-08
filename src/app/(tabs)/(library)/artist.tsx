@@ -7,6 +7,7 @@ import { colors, spacing, typography } from '@/theme';
 import { BackButton } from '@/components/BackButton';
 import { Icon } from '@/components/Icon';
 import { TrackRow } from '@/components/TrackRow';
+import { useTrackActionsMenu } from '@/components/useTrackActionsMenu';
 import {
   buildAlbums,
   tracksForAlbum,
@@ -34,6 +35,7 @@ export default function ArtistScreen() {
   const { tracks } = useLibrary();
   const { playQueue } = usePlayer();
   const { track: activeTrack } = usePlayback();
+  const trackMenu = useTrackActionsMenu();
 
   // Sections (un album = une section) + file de lecture à plat, dérivées ensemble.
   const { sections, queue, albumCount } = useMemo(() => {
@@ -95,12 +97,15 @@ export default function ArtistScreen() {
             // L'album est déjà dans l'en-tête de section : sous-titre masqué pour ne pas répéter.
             subtitle=""
             onPress={() => void playQueue(queue, indexById.get(item.id) ?? 0)}
+            onLongPress={() => trackMenu.open(item)}
           />
         )}
         ListEmptyComponent={<Text style={styles.empty}>Artiste introuvable.</Text>}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
       />
+
+      {trackMenu.element}
     </View>
   );
 }

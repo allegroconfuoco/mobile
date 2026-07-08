@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { FlatList, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -8,8 +8,7 @@ import { Icon } from '@/components/Icon';
 import { BackButton } from '@/components/BackButton';
 import { PressableScale } from '@/components/PressableScale';
 import { TrackRow } from '@/components/TrackRow';
-import { TrackActionsSheet } from '@/components/TrackActionsSheet';
-import { PlaylistPickerSheet } from '@/components/PlaylistPickerSheet';
+import { useTrackActionsMenu } from '@/components/useTrackActionsMenu';
 import type { LocalTrack } from '@/library/useAudioLibrary';
 import { useLibrary } from '@/library/LibraryProvider';
 import { useFavorites } from '@/library/FavoritesProvider';
@@ -20,13 +19,11 @@ import { usePlayback } from '@/player/usePlayback';
 export default function FavoritesScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { tracksById, setTrackExcluded } = useLibrary();
-  const { favoriteIds, isFavorite, toggleFavorite } = useFavorites();
-  const { playQueue, playNext, addToQueue } = usePlayer();
+  const { tracksById } = useLibrary();
+  const { favoriteIds } = useFavorites();
+  const { playQueue } = usePlayer();
   const { track: activeTrack } = usePlayback();
-
-  const [menuTrack, setMenuTrack] = useState<LocalTrack | null>(null);
-  const [pickerTrack, setPickerTrack] = useState<LocalTrack | null>(null);
+  const trackMenu = useTrackActionsMenu();
 
   // Résout les ids favoris en pistes locales, dans l'ordre du `Set` (récent d'abord au démarrage) ;
   // les favoris dont le fichier a disparu de l'appareil sont simplement omis.
@@ -76,7 +73,7 @@ export default function FavoritesScreen() {
             track={item}
             isActive={item.id === activeTrack?.id}
             onPress={() => void playQueue(tracks, index)}
-            onLongPress={() => setMenuTrack(item)}
+            onLongPress={() => trackMenu.open(item)}
           />
         )}
         ListEmptyComponent={
@@ -91,21 +88,7 @@ export default function FavoritesScreen() {
         showsVerticalScrollIndicator={false}
       />
 
-      <TrackActionsSheet
-        title={menuTrack?.title ?? null}
-        isFavorite={menuTrack ? isFavorite(menuTrack.id) : false}
-        onClose={() => setMenuTrack(null)}
-        onPlayNext={() => menuTrack && void playNext([menuTrack])}
-        onAddToQueue={() => menuTrack && void addToQueue([menuTrack])}
-        onToggleFavorite={() => menuTrack && toggleFavorite(menuTrack.id, menuTrack.mbid)}
-        onAddToPlaylist={() => setPickerTrack(menuTrack)}
-        onFixMetadata={() =>
-          menuTrack && router.push({ pathname: '/metadata-fix', params: { trackId: menuTrack.id } })
-        }
-        onExclude={() => menuTrack && setTrackExcluded(menuTrack.id, true)}
-      />
-
-      <PlaylistPickerSheet track={pickerTrack} onClose={() => setPickerTrack(null)} />
+      {trackMenu.element}
     </View>
   );
 }

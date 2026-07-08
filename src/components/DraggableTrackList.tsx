@@ -51,6 +51,11 @@ export type DraggableTrackListProps = {
   onPlay: (index: number) => void;
   onRemove: (index: number) => void;
   onMove: (fromIndex: number, toIndex: number) => void;
+  /**
+   * Appui long sur le corps d'une ligne (menu d'actions). Optionnel : ne s'affiche que si fourni,
+   * et jamais sur une piste indisponible. N'entre pas en conflit avec le drag (poignée dédiée).
+   */
+  onLongPress?: (index: number) => void;
   /** Libellé d'accessibilité de l'action « retirer » (ex. « Retirer de la file »). */
   removeLabel?: string;
   contentPaddingBottom?: number;
@@ -73,6 +78,7 @@ export function DraggableTrackList({
   onPlay,
   onRemove,
   onMove,
+  onLongPress,
   removeLabel = 'Retirer',
   contentPaddingBottom = 0,
 }: DraggableTrackListProps) {
@@ -135,6 +141,7 @@ export function DraggableTrackList({
           onEndDrag={endDrag}
           onPlay={() => onPlay(index)}
           onRemove={() => onRemove(index)}
+          onLongPress={onLongPress ? () => onLongPress(index) : undefined}
         />
       ))}
     </ScrollView>
@@ -168,6 +175,7 @@ type DraggableRowProps = {
   onEndDrag: (index: number) => void;
   onPlay: () => void;
   onRemove: () => void;
+  onLongPress?: () => void;
 };
 
 function DraggableRow(props: DraggableRowProps) {
@@ -206,6 +214,7 @@ function DraggableRow(props: DraggableRowProps) {
     removeLabel,
     onPlay,
     onRemove,
+    onLongPress,
   } = props;
   const { title, artist, artworkUri } = item;
   const unavailable = item.unavailable ?? false;
@@ -223,12 +232,17 @@ function DraggableRow(props: DraggableRowProps) {
       <View style={[styles.row, (isActive || isDragging) && styles.rowRaised]}>
         <Pressable
           onPress={unavailable ? undefined : onPlay}
+          onLongPress={unavailable ? undefined : onLongPress}
+          delayLongPress={300}
           disabled={unavailable}
           style={[styles.rowMain, unavailable && styles.rowMainUnavailable]}
           accessibilityRole="button"
           accessibilityState={{ selected: isActive, disabled: unavailable }}
           accessibilityLabel={
             unavailable ? `${title}, indisponible sur cet appareil` : `Lire ${title}`
+          }
+          accessibilityHint={
+            onLongPress && !unavailable ? 'Appui long pour plus d’actions' : undefined
           }
         >
           <Cover uri={artworkUri} />

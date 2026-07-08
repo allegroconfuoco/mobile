@@ -8,6 +8,7 @@ import { BackButton } from '@/components/BackButton';
 import { Icon } from '@/components/Icon';
 import { DraggableTrackList, type DraggableTrackItem } from '@/components/DraggableTrackList';
 import { PlaylistNameDialog } from '@/components/PlaylistNameDialog';
+import { useTrackActionsMenu } from '@/components/useTrackActionsMenu';
 import { UNKNOWN_ARTIST } from '@/library/grouping';
 import { useLibrary } from '@/library/LibraryProvider';
 import { usePlaylistsContext } from '@/library/PlaylistsProvider';
@@ -50,6 +51,7 @@ export default function PlaylistScreen() {
   } = usePlaylistsContext();
   const { playQueue } = usePlayer();
   const { track: activeTrack } = usePlayback();
+  const trackMenu = useTrackActionsMenu();
 
   const [renaming, setRenaming] = useState(false);
 
@@ -186,6 +188,14 @@ export default function PlaylistScreen() {
             )
           }
           onRemove={(index) => removeTrackFromPlaylist(id, entries[index].entry.sharedTrackId)}
+          // Appui long → menu d'actions, seulement pour une entrée résolue en fichier local
+          // (les pistes indisponibles n'exposent déjà pas le geste, cf. DraggableTrackList).
+          onLongPress={(index) => {
+            const localTrack = entries[index]?.localTrack;
+            if (localTrack) {
+              trackMenu.open(localTrack);
+            }
+          }}
           removeLabel="Retirer de la playlist"
           contentPaddingBottom={insets.bottom + spacing.xxl}
         />
@@ -199,6 +209,8 @@ export default function PlaylistScreen() {
         onSubmit={(newName) => renamePlaylist(id, newName)}
         onClose={() => setRenaming(false)}
       />
+
+      {trackMenu.element}
     </View>
   );
 }

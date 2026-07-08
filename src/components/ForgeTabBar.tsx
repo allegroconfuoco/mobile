@@ -14,10 +14,10 @@ import { MiniPlayer } from '@/components/MiniPlayer';
  * accent sur l'onglet actif, icônes Material Symbols.
  */
 
-/** Icône associée à chaque route de la tab bar. */
+/** Icône associée à chaque route de la tab bar (clé = nom du groupe/onglet). */
 const TAB_ICONS: Record<string, IconName> = {
-  index: 'library_music',
-  settings: 'settings',
+  '(library)': 'library_music',
+  '(settings)': 'settings',
 };
 
 export function ForgeTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
