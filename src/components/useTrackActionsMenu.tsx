@@ -6,6 +6,8 @@ import { PlaylistPickerSheet } from '@/components/PlaylistPickerSheet';
 import { useLibrary } from '@/library/LibraryProvider';
 import { useFavorites } from '@/library/FavoritesProvider';
 import type { LocalTrack } from '@/library/useAudioLibrary';
+import { confirmRestoreTags } from '@/library/writeTags';
+import * as db from '@/library/db';
 import { usePlayer } from '@/player/PlayerProvider';
 
 /**
@@ -23,7 +25,7 @@ export function useTrackActionsMenu(): {
   element: ReactNode;
 } {
   const router = useRouter();
-  const { setTrackExcluded } = useLibrary();
+  const { setTrackExcluded, reloadTracks } = useLibrary();
   const { isFavorite, toggleFavorite } = useFavorites();
   const { playNext, addToQueue } = usePlayer();
 
@@ -49,6 +51,11 @@ export function useTrackActionsMenu(): {
           menuTrack &&
           router.push({ pathname: '/identify-album', params: { trackId: menuTrack.id } })
         }
+        onWriteToFile={() =>
+          menuTrack && router.push({ pathname: '/write-tags', params: { trackId: menuTrack.id } })
+        }
+        onRestoreFile={() => menuTrack && confirmRestoreTags(menuTrack, reloadTracks)}
+        hasFileBackup={menuTrack ? db.hasTagBackup(menuTrack.id) : false}
         onExclude={() => menuTrack && setTrackExcluded(menuTrack.id, true)}
       />
 

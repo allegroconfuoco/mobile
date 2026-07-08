@@ -56,20 +56,36 @@ export default function AlbumScreen() {
   const orderUncertain = albumTracks.some((t) => t.trackNo == null);
 
   const identify = () => router.push({ pathname: '/identify-album', params: { artist, title } });
+  const writeToFiles = () =>
+    router.push({
+      pathname: '/write-tags',
+      params: { scope: 'album', albumArtist: artist, album: title, label: title },
+    });
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + spacing.sm }]}>
       <View style={styles.topBar}>
         <BackButton onPress={() => router.back()} />
-        <Pressable
-          onPress={identify}
-          hitSlop={12}
-          style={styles.identifyButton}
-          accessibilityRole="button"
-          accessibilityLabel="Identifier l’album"
-        >
-          <Icon name="travel_explore" size={24} color={colors.textPrimary} />
-        </Pressable>
+        <View style={styles.topActions}>
+          <Pressable
+            onPress={writeToFiles}
+            hitSlop={12}
+            style={styles.identifyButton}
+            accessibilityRole="button"
+            accessibilityLabel="Écrire l’album dans les fichiers"
+          >
+            <Icon name="save" size={24} color={colors.textPrimary} />
+          </Pressable>
+          <Pressable
+            onPress={identify}
+            hitSlop={12}
+            style={styles.identifyButton}
+            accessibilityRole="button"
+            accessibilityLabel="Identifier l’album"
+          >
+            <Icon name="travel_explore" size={24} color={colors.textPrimary} />
+          </Pressable>
+        </View>
       </View>
 
       <SectionList
@@ -134,8 +150,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  topActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   identifyButton: {
-    paddingHorizontal: spacing.xxl,
+    paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
   },
   badge: {

@@ -72,6 +72,8 @@ export async function runEnrichmentPass(deps: EnrichmentDeps): Promise<void> {
             'matched',
             {
               mbid: match.mbid,
+              title: match.title,
+              artist: match.artist,
               album: match.album,
               coverArtUrl: match.coverArtUrl,
               releaseGroupMbid: match.releaseGroupMbid,

@@ -26,6 +26,18 @@ export type TrackActionsSheetProps = {
   onFixMetadata: () => void;
   /** Ouvre l'écran de rattachement de ce titre seul à un album (release MusicBrainz). */
   onLinkAlbum: () => void;
+  /**
+   * Grave les infos corrigées dans le fichier MP3 (write-back ID3). Optionnel : l'action n'apparaît
+   * que si fourni.
+   */
+  onWriteToFile?: () => void;
+  /**
+   * Restaure les tags d'origine du fichier (sauvegardés avant la première gravure). Optionnel :
+   * l'action n'apparaît que si fourni **et** qu'une sauvegarde existe (`hasFileBackup`).
+   */
+  onRestoreFile?: () => void;
+  /** Une sauvegarde des tags d'origine existe pour cette piste (conditionne l'action « restaurer »). */
+  hasFileBackup?: boolean;
   /** Exclut la piste de la bibliothèque (et des scans suivants). */
   onExclude: () => void;
 };
@@ -40,6 +52,9 @@ export function TrackActionsSheet({
   onAddToPlaylist,
   onFixMetadata,
   onLinkAlbum,
+  onWriteToFile,
+  onRestoreFile,
+  hasFileBackup = false,
   onExclude,
 }: TrackActionsSheetProps) {
   const visible = title !== null;
@@ -72,6 +87,16 @@ export function TrackActionsSheet({
       />
       <Action icon="edit_note" label="Corriger les infos" onPress={run(onFixMetadata)} />
       <Action icon="travel_explore" label="Rattacher à un album" onPress={run(onLinkAlbum)} />
+      {onWriteToFile && (
+        <Action icon="save" label="Écrire dans le fichier" onPress={run(onWriteToFile)} />
+      )}
+      {onRestoreFile && hasFileBackup && (
+        <Action
+          icon="settings_backup_restore"
+          label="Restaurer les tags d’origine"
+          onPress={run(onRestoreFile)}
+        />
+      )}
       <Action icon="block" label="Exclure de la bibliothèque" onPress={run(onExclude)} />
     </BottomSheet>
   );

@@ -23,6 +23,8 @@ import { usePlayer, usePlaybackMode } from '@/player/PlayerProvider';
 import { usePlayback } from '@/player/usePlayback';
 import { useLibrary } from '@/library/LibraryProvider';
 import { useFavorites } from '@/library/FavoritesProvider';
+import { confirmRestoreTags } from '@/library/writeTags';
+import * as db from '@/library/db';
 import { tapLight, tapMedium } from '@/lib/haptics';
 
 /** Formate une durée (secondes) en `m:ss`. */
@@ -43,7 +45,7 @@ export default function NowPlayingScreen() {
   const { track, isPlaying, position, duration } = usePlayback();
   const { togglePlayPause, skipToNext, skipToPrevious, seekTo, playNext, addToQueue } = usePlayer();
   const { repeatMode, shuffle, cycleRepeat, toggleShuffle } = usePlaybackMode();
-  const { tracksById, setTrackExcluded } = useLibrary();
+  const { tracksById, setTrackExcluded, reloadTracks } = useLibrary();
   const { isFavorite, toggleFavorite } = useFavorites();
 
   // Piste locale correspondant à la lecture en cours (pour favori + menu d'actions).
@@ -402,6 +404,11 @@ export default function NowPlayingScreen() {
         onLinkAlbum={() =>
           local && router.push({ pathname: '/identify-album', params: { trackId: local.id } })
         }
+        onWriteToFile={() =>
+          local && router.push({ pathname: '/write-tags', params: { trackId: local.id } })
+        }
+        onRestoreFile={() => local && confirmRestoreTags(local, reloadTracks)}
+        hasFileBackup={local ? db.hasTagBackup(local.id) : false}
         onExclude={() => local && setTrackExcluded(local.id, true)}
       />
 

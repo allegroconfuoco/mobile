@@ -109,6 +109,8 @@ export default function MetadataFixScreen() {
     }
     confirm({
       mbid: enrichment.mbid,
+      title: enrichment.title,
+      artist: enrichment.artist,
       album: enrichment.album,
       coverArtUrl: enrichment.coverArtUrl,
       releaseGroupMbid: enrichment.releaseGroupMbid,
@@ -273,6 +275,8 @@ export default function MetadataFixScreen() {
                     onPress={() =>
                       confirm({
                         mbid: r.mbid,
+                        title: r.title,
+                        artist: r.artist,
                         album: r.album,
                         coverArtUrl: r.coverArtUrl,
                         releaseGroupMbid: r.releaseGroupMbid,

@@ -128,6 +128,19 @@ export default function PlaylistScreen() {
         <BackButton onPress={() => router.back()} />
         <View style={styles.topActions}>
           <Pressable
+            onPress={() =>
+              router.push({
+                pathname: '/write-tags',
+                params: { scope: 'playlist', playlistId: id, label: name },
+              })
+            }
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Écrire les titres de la playlist dans les fichiers"
+          >
+            <Icon name="save" size={24} color={colors.textPrimary} />
+          </Pressable>
+          <Pressable
             onPress={() => setRenaming(true)}
             hitSlop={12}
             accessibilityRole="button"

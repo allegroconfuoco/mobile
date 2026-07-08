@@ -190,6 +190,8 @@ export default function IdentifyAlbumScreen() {
           trackId: m.local.id,
           releaseMbid: release.mbid,
           recordingMbid: m.release.recordingMbid,
+          recordingTitle: m.release.title || null,
+          recordingArtist: release.artist,
           album: release.title || null,
           albumArtist: release.artist,
           trackNo: m.release.position,

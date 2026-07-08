@@ -61,7 +61,23 @@ export default function ArtistScreen() {
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + spacing.sm }]}>
-      <BackButton onPress={() => router.back()} />
+      <View style={styles.topBar}>
+        <BackButton onPress={() => router.back()} />
+        <Pressable
+          onPress={() =>
+            router.push({
+              pathname: '/write-tags',
+              params: { scope: 'artist', artist: name, label: name },
+            })
+          }
+          hitSlop={12}
+          style={styles.writeButton}
+          accessibilityRole="button"
+          accessibilityLabel="Écrire les titres de l’artiste dans les fichiers"
+        >
+          <Icon name="save" size={24} color={colors.textPrimary} />
+        </Pressable>
+      </View>
 
       <SectionList
         sections={sections}
@@ -131,6 +147,15 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  writeButton: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
   },
   header: {
     paddingHorizontal: spacing.xxl,

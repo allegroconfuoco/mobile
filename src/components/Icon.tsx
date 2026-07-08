@@ -30,6 +30,8 @@ export type IconName =
   | 'sync'
   | 'chevron_right'
   | 'expand_more'
+  | 'expand_less'
+  | 'music_off'
   | 'more_horiz'
   | 'arrow_back'
   | 'queue_music'
@@ -60,6 +62,8 @@ export type IconName =
   | 'travel_explore'
   | 'warning'
   | 'restart_alt'
+  | 'save'
+  | 'settings_backup_restore'
   | 'logout';
 
 type IconProps = {

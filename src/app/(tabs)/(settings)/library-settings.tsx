@@ -38,8 +38,28 @@ export default function LibrarySettingsScreen() {
         contentContainerStyle={{ paddingBottom: insets.bottom + spacing.xxl }}
         showsVerticalScrollIndicator={false}
       >
+        {/* Métadonnées : gravure de masse dans les fichiers (write-back ID3). */}
+        <Text style={styles.sectionLabel}>Métadonnées</Text>
+        <View style={styles.list}>
+          <Pressable
+            onPress={() => router.push({ pathname: '/write-tags', params: { scope: 'library' } })}
+            style={styles.row}
+            accessibilityRole="button"
+            accessibilityLabel="Écrire toute la bibliothèque dans les fichiers"
+          >
+            <Icon name="save" size={22} color={colors.accentIcon} />
+            <View style={styles.rowText}>
+              <Text style={styles.rowLabel}>Écrire dans les fichiers</Text>
+              <Text style={styles.rowHint}>
+                Revoir puis graver les tags de toute la bibliothèque, piste par piste
+              </Text>
+            </View>
+            <Icon name="chevron_right" size={22} color={colors.textMuted} />
+          </Pressable>
+        </View>
+
         {/* Dossiers scannés */}
-        <Text style={styles.sectionLabel}>Dossiers scannés</Text>
+        <Text style={[styles.sectionLabel, styles.sectionSpacer]}>Dossiers scannés</Text>
         {folders.length === 0 ? (
           <Text style={styles.empty}>
             Aucun dossier détecté pour l’instant. Lance un scan depuis l’onglet Bibliothèque.
