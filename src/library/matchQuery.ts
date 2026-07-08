@@ -157,12 +157,20 @@ function stripEmbeddedArtist(
   title: string,
   artist: string | null
 ): { title: string; artist: string | null } {
-  const parts = title
+  let parts = title
     .split(ARTIST_TITLE_SEPARATOR)
     .map(cleanField)
     .filter((p) => p.length > 0);
+  // Numéro de piste pur collé en tête d'un tag titre (« 1 - Artiste - Titre », « 03 - Titre ») :
+  // ce n'est ni un artiste ni un titre. On ne retire QUE des segments **entièrement** numériques
+  // (« 1 », « 03 »), donc « 99 Luftballons » ou « 7 rings » (un seul segment, sans séparateur)
+  // ne sont jamais touchés. Le chemin nom-de-fichier retire déjà ce préfixe (`TRACK_NO_PREFIX`) ;
+  // ici on couvre le cas où le bruit vit dans le tag titre lui-même.
+  if (parts.length >= 2 && /^\d{1,2}$/.test(parts[0])) {
+    parts = parts.slice(1);
+  }
   if (parts.length < 2) {
-    return { title, artist };
+    return { title: parts[0] ?? title, artist };
   }
   const head = parts[0];
   const tail = parts[parts.length - 1];

@@ -21,6 +21,7 @@ import { useLibrary } from '@/library/LibraryProvider';
 import * as db from '@/library/db';
 import { ApiError } from '@/api/auth';
 import { searchMetadata, type ResolvedMetadata } from '@/library/musicbrainzApi';
+import { buildMatchQuery } from '@/library/matchQuery';
 
 /**
  * UI de correction manuelle des métadonnées (issue #20).
@@ -47,8 +48,15 @@ export default function MetadataFixScreen() {
   );
   const hasProposal = enrichment?.mbid != null;
 
-  const [artistInput, setArtistInput] = useState(track?.artist ?? '');
-  const [titleInput, setTitleInput] = useState(track?.title ?? '');
+  // Préremplissage des champs de recherche via le **même** parser que l'auto-match (`buildMatchQuery`,
+  // #18) : on retire le bruit (préfixe artiste, `(Official Video)`, `[2019]`, feat., remaster, n° de
+  // piste…) au lieu de recopier le tag/nom de fichier brut. Sinon la recherche manuelle repartait
+  // avec un titre pollué et ne trouvait rien — l'incohérence remontée avec le rangement d'album.
+  const cleaned = track
+    ? buildMatchQuery({ title: track.title, artist: track.artist, filename: track.filename })
+    : null;
+  const [artistInput, setArtistInput] = useState(cleaned?.artist ?? track?.artist ?? '');
+  const [titleInput, setTitleInput] = useState(cleaned?.title ?? track?.title ?? '');
   // On révèle la recherche d'emblée quand il n'y a pas de match à valider.
   const [showSearch, setShowSearch] = useState(!hasProposal);
   const [results, setResults] = useState<ResolvedMetadata[] | null>(null);
