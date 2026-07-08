@@ -7,6 +7,7 @@
  * partagées entre l'onglet Bibliothèque et les écrans détail (`app/artist.tsx`, `app/album.tsx`)
  * pour que le regroupement et le filtrage restent strictement cohérents.
  */
+import type { ReleaseTrackRef } from './db';
 import type { LocalTrack } from './useAudioLibrary';
 
 export const UNKNOWN_ARTIST = 'Artiste inconnu';
@@ -195,6 +196,105 @@ export function groupAlbumByDisc(albumTracks: LocalTrack[]): AlbumDisc[] {
       last.data.push(t);
     } else {
       discs.push({ disc: t.discNo ?? null, data: [t] });
+    }
+  }
+  return discs;
+}
+
+// --- Titres fantômes (albums partiels identifiés) --------------------------------------------
+
+/**
+ * Une ligne du détail d'un album : soit un fichier local (`local`), soit une piste **manquante**
+ * (`ghost`) connue par la tracklist de la release identifiée mais absente localement.
+ */
+export type AlbumRow =
+  | { kind: 'local'; track: LocalTrack }
+  | { kind: 'ghost'; disc: number; position: number; title: string };
+
+/** Un disque de l'affichage détail, mêlant fichiers locaux et titres fantômes. */
+export type AlbumRowDisc = {
+  disc: number | null;
+  data: AlbumRow[];
+};
+
+/** Disque d'une ligne : `discNo` du fichier local (repli `null`), ou disque de la piste release. */
+function discOfRow(row: AlbumRow): number | null {
+  return row.kind === 'local' ? (row.track.discNo ?? null) : row.disc;
+}
+
+/**
+ * Trouve le fichier local correspondant à une piste de release, sans réutiliser un fichier déjà
+ * apparié (`used`). D'abord par recording MBID (le plus fiable, posé par l'identification #23),
+ * sinon par (disque, position) — l'identification aligne `discNo`/`trackNo` des locaux sur la
+ * release, donc ce repli est fiable même sans MBID.
+ */
+function findLocalForEntry(
+  albumTracks: LocalTrack[],
+  entry: ReleaseTrackRef,
+  used: Set<string>
+): LocalTrack | null {
+  if (entry.recordingMbid) {
+    const byMbid = albumTracks.find(
+      (t) => !used.has(t.id) && t.mbid != null && t.mbid === entry.recordingMbid
+    );
+    if (byMbid) {
+      return byMbid;
+    }
+  }
+  return (
+    albumTracks.find(
+      (t) => !used.has(t.id) && (t.discNo ?? 1) === entry.discNo && t.trackNo === entry.position
+    ) ?? null
+  );
+}
+
+/**
+ * Fusionne les fichiers locaux d'un album avec la tracklist complète de sa release identifiée
+ * (issue #23) : chaque piste de la release devient une ligne `local` (fichier possédé) ou `ghost`
+ * (titre manquant), dans l'ordre de la release. Les fichiers locaux non appariés (bonus, ou hors
+ * release) sont ajoutés en fin. Tracklist vide (album non identifié, ou identifié avant cette
+ * feature) → aucun fantôme, on garde le comportement historique (locaux triés).
+ */
+export function mergeAlbumWithTracklist(
+  albumTracks: LocalTrack[],
+  tracklist: ReleaseTrackRef[]
+): AlbumRow[] {
+  if (tracklist.length === 0) {
+    return [...albumTracks].sort(byDiscThenTrack).map((track) => ({ kind: 'local', track }));
+  }
+  const used = new Set<string>();
+  const rows: AlbumRow[] = [];
+  for (const entry of tracklist) {
+    const local = findLocalForEntry(albumTracks, entry, used);
+    if (local) {
+      used.add(local.id);
+      rows.push({ kind: 'local', track: local });
+    } else {
+      rows.push({
+        kind: 'ghost',
+        disc: entry.discNo,
+        position: entry.position,
+        title: entry.title ?? '',
+      });
+    }
+  }
+  const leftover = albumTracks.filter((t) => !used.has(t.id)).sort(byDiscThenTrack);
+  for (const track of leftover) {
+    rows.push({ kind: 'local', track });
+  }
+  return rows;
+}
+
+/** Découpe les lignes fusionnées (`mergeAlbumWithTracklist`) en disques consécutifs. */
+export function groupAlbumRowsByDisc(rows: AlbumRow[]): AlbumRowDisc[] {
+  const discs: AlbumRowDisc[] = [];
+  for (const row of rows) {
+    const disc = discOfRow(row);
+    const last = discs[discs.length - 1];
+    if (last && last.disc === disc) {
+      last.data.push(row);
+    } else {
+      discs.push({ disc, data: [row] });
     }
   }
   return discs;

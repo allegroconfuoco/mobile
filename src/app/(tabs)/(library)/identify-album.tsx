@@ -201,6 +201,9 @@ export default function IdentifyAlbumScreen() {
       }
     }
     db.saveAlbumOverlays(entries, Date.now());
+    // Persiste la tracklist **complète** de la release (toutes les pistes, mappées ou non) : c'est
+    // ce qui permet d'afficher les titres manquants en fantôme sur le détail d'un album partiel.
+    db.saveReleaseTracklist(release.mbid, release.tracks);
     reloadTracks();
     router.back();
   }, [release, mapping, reloadTracks, router]);

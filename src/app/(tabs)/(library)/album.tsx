@@ -10,12 +10,14 @@ import { TrackCover } from '@/components/TrackCover';
 import { TrackRow } from '@/components/TrackRow';
 import { useTrackActionsMenu } from '@/components/useTrackActionsMenu';
 import {
-  groupAlbumByDisc,
+  groupAlbumRowsByDisc,
   makeAlbumKey,
+  mergeAlbumWithTracklist,
   tracksForAlbum,
   UNKNOWN_ALBUM,
   UNKNOWN_ARTIST,
 } from '@/library/grouping';
+import * as db from '@/library/db';
 import { useLibrary } from '@/library/LibraryProvider';
 import { usePlayer } from '@/player/PlayerProvider';
 import { usePlayback } from '@/player/usePlayback';
@@ -40,20 +42,38 @@ export default function AlbumScreen() {
   const { track: activeTrack } = usePlayback();
   const trackMenu = useTrackActionsMenu();
 
-  // File de lecture à plat + sections par disque + index global d'une piste, dérivés ensemble.
-  const { albumTracks, sections, indexById } = useMemo(() => {
+  // Pistes locales, sections (locaux + fantômes) et index de lecture, dérivés ensemble. Si l'album
+  // a été identifié (#23), on charge la tracklist complète de la release et on intercale les titres
+  // manquants en « fantôme » ; sinon, seules les pistes locales sont affichées (aucun fantôme).
+  const { albumTracks, sections, indexById, ghostCount, identified } = useMemo(() => {
     const ordered = tracksForAlbum(tracks, makeAlbumKey(artist, title));
+    const releaseMbid = db.getAlbumReleaseMbid(ordered.map((t) => t.id));
+    const tracklist = releaseMbid ? db.loadReleaseTracklist(releaseMbid) : [];
+    const rows = mergeAlbumWithTracklist(ordered, tracklist);
+    // File de lecture = pistes locales uniquement (les fantômes ne sont jamais jouables), dans
+    // l'ordre d'affichage ; l'index de lecture est clé par id local, indépendant des fantômes.
+    const locals = rows.flatMap((r) => (r.kind === 'local' ? [r.track] : []));
     const map = new Map<string, number>();
-    ordered.forEach((t, i) => map.set(t.id, i));
-    return { albumTracks: ordered, sections: groupAlbumByDisc(ordered), indexById: map };
+    locals.forEach((t, i) => map.set(t.id, i));
+    return {
+      albumTracks: locals,
+      sections: groupAlbumRowsByDisc(rows),
+      indexById: map,
+      ghostCount: rows.length - locals.length,
+      identified: releaseMbid != null,
+    };
   }, [tracks, artist, title]);
 
   // Première pochette disponible : tag local, sinon pochette d'enrichissement (issue #19).
   const cover = albumTracks.map((t) => t.artworkUri ?? t.coverArtUrl).find(Boolean) ?? null;
   const multiDisc = sections.length > 1;
-  // Ordre incertain si au moins une piste n'a pas de n° (tag TRCK manquant → tri alphabétique) :
-  // l'identification d'album (issue #23) le corrige via une release MusicBrainz.
+  // Ordre incertain si au moins une piste n'a pas de n° (tag TRCK manquant → tri alphabétique).
   const orderUncertain = albumTracks.some((t) => t.trackNo == null);
+  // Incomplétude probable : numérotation à trous (n° max > nb de pistes). Heuristique qui, sur un
+  // album partiel **non encore identifié**, incite à l'identifier — c'est l'identification qui
+  // révèle ensuite les titres manquants en fantôme.
+  const maxTrackNo = albumTracks.reduce((m, t) => Math.max(m, t.trackNo ?? 0), 0);
+  const hasGaps = maxTrackNo > albumTracks.length;
 
   const identify = () => router.push({ pathname: '/identify-album', params: { artist, title } });
   const editArtists = () =>
@@ -104,7 +124,9 @@ export default function AlbumScreen() {
 
       <SectionList
         sections={sections}
-        keyExtractor={(track) => track.id}
+        keyExtractor={(item) =>
+          item.kind === 'local' ? item.track.id : `ghost-${item.disc}-${item.position}`
+        }
         stickySectionHeadersEnabled={false}
         ListHeaderComponent={
           <View style={styles.header}>
@@ -117,16 +139,17 @@ export default function AlbumScreen() {
             </Text>
             <Text style={styles.count}>
               {albumTracks.length} {albumTracks.length > 1 ? 'titres' : 'titre'}
+              {ghostCount > 0 ? ` · ${ghostCount} manquant${ghostCount > 1 ? 's' : ''}` : ''}
             </Text>
-            {orderUncertain && (
+            {!identified && (orderUncertain || hasGaps) && (
               <Pressable
                 onPress={identify}
                 style={styles.badge}
                 accessibilityRole="button"
-                accessibilityLabel="Ordre incertain, identifier l’album"
+                accessibilityLabel="Identifier l’album pour voir les titres manquants"
               >
-                <Icon name="warning" size={14} color={colors.accentLabel} />
-                <Text style={styles.badgeText}>Ordre incertain · identifier</Text>
+                <Icon name="travel_explore" size={14} color={colors.accentLabel} />
+                <Text style={styles.badgeText}>Identifier · voir les titres manquants</Text>
               </Pressable>
             )}
           </View>
@@ -134,16 +157,20 @@ export default function AlbumScreen() {
         renderSectionHeader={({ section }) =>
           multiDisc ? <Text style={styles.discHeader}>Disque {section.disc ?? '?'}</Text> : null
         }
-        renderItem={({ item, index }) => (
-          <TrackRow
-            track={item}
-            isActive={item.id === activeTrack?.id}
-            leadingNumber={item.trackNo ?? index + 1}
-            subtitle={item.artist ?? UNKNOWN_ARTIST}
-            onPress={() => void playQueue(albumTracks, indexById.get(item.id) ?? 0)}
-            onLongPress={() => trackMenu.open(item)}
-          />
-        )}
+        renderItem={({ item }) =>
+          item.kind === 'local' ? (
+            <TrackRow
+              track={item.track}
+              isActive={item.track.id === activeTrack?.id}
+              leadingNumber={item.track.trackNo ?? (indexById.get(item.track.id) ?? 0) + 1}
+              subtitle={item.track.artist ?? UNKNOWN_ARTIST}
+              onPress={() => void playQueue(albumTracks, indexById.get(item.track.id) ?? 0)}
+              onLongPress={() => trackMenu.open(item.track)}
+            />
+          ) : (
+            <GhostRow position={item.position} title={item.title} />
+          )
+        }
         ListEmptyComponent={<Text style={styles.empty}>Album introuvable.</Text>}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
@@ -154,10 +181,70 @@ export default function AlbumScreen() {
   );
 }
 
+/**
+ * Ligne d'un titre manquant (« fantôme ») : piste connue par la release identifiée mais absente
+ * localement. Purement visuelle et non interactive — on ne peut pas la jouer, elle sert à voir ce
+ * qu'il reste à récupérer pour compléter l'album. Aucune action d'acquisition (hors périmètre).
+ */
+function GhostRow({ position, title }: { position: number; title: string }) {
+  return (
+    <View
+      style={styles.ghostRow}
+      accessibilityRole="text"
+      accessibilityLabel={`${title || 'Titre inconnu'}, titre manquant`}
+    >
+      <View style={styles.ghostNumberBox}>
+        <Text style={styles.ghostNumber}>{position}</Text>
+      </View>
+      <View style={styles.ghostText}>
+        <Text style={styles.ghostTitle} numberOfLines={1}>
+          {title || 'Titre inconnu'}
+        </Text>
+        <Text style={styles.ghostMeta} numberOfLines={1}>
+          Manquant
+        </Text>
+      </View>
+      <Icon name="music_off" size={18} color={colors.textMuted} />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  ghostRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingHorizontal: spacing.xxl,
+    paddingVertical: spacing.md,
+    opacity: 0.55,
+  },
+  ghostNumberBox: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ghostNumber: {
+    ...typography.body,
+    color: colors.textMuted,
+    fontVariant: ['tabular-nums'],
+  },
+  ghostText: {
+    flex: 1,
+  },
+  ghostTitle: {
+    ...typography.heading,
+    color: colors.textSecondary,
+  },
+  ghostMeta: {
+    ...typography.label,
+    fontSize: 10,
+    color: colors.textMuted,
+    marginTop: 2,
   },
   topBar: {
     flexDirection: 'row',
