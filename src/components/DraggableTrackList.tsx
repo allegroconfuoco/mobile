@@ -1,13 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Animated,
-  PanResponder,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Animated, FlatList, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 
 import { colors, coverFallback, radii, spacing, typography } from '@/theme';
@@ -21,15 +13,24 @@ import { selection, tapLight } from '@/lib/haptics';
  * configurés — cf. CLAUDE.md sur les deps natives fragiles). Le geste part d'une **poignée** dédiée
  * pour ne pas entrer en conflit avec le tap (qui saute à la piste) ni avec le défilement.
  *
- * Rendu à position absolue sur une grille de hauteur fixe (`ROW_HEIGHT`) : la ligne tirée suit le
- * doigt, les autres s'écartent. Au lâcher, on réordonne localement (optimiste) puis on remonte le
- * déplacement via `onMove`.
+ * **Virtualisée** (lot 4 de l'audit) : les lignes vivent dans une `FlatList` à hauteur fixe
+ * (`getItemLayout`), en flux normal — une grande playlist ne monte plus toutes ses lignes. Pendant
+ * un glisser, la ligne d'origine devient invisible (sa place reste occupée) et un **clone en
+ * overlay**, hors de la liste, suit le doigt : la virtualisation n'est jamais parasitée par un
+ * zIndex inter-cellules. Les autres lignes s'écartent par `transform`. Près d'un bord, la liste
+ * **auto-défile** (impossible avant : tout était dans un ScrollView gelé).
+ *
+ * Au lâcher, on réordonne localement (optimiste) puis on remonte le déplacement via `onMove`.
  *
  * Générique (file d'attente *et* détail de playlist) : les items sont normalisés en
  * `DraggableTrackItem`, chaque appelant projette son type source (RNTP `Track`, `LocalTrack`…).
  */
 
 const ROW_HEIGHT = 64;
+/** Distance au bord (px) sous laquelle l'auto-scroll s'enclenche pendant un glisser. */
+const AUTO_SCROLL_EDGE = 80;
+/** Pas d'auto-scroll par tick (~16 ms) : ~750 px/s. */
+const AUTO_SCROLL_STEP = 12;
 
 /** Forme minimale attendue par la liste : chaque appelant y projette son type source. */
 export type DraggableTrackItem = {
@@ -85,7 +86,20 @@ export function DraggableTrackList({
 }: DraggableTrackListProps) {
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  // Position verticale (viewport) du haut de la ligne saisie, figée au début du geste : le clone
+  // s'y ancre et suit le doigt via `pan`, indépendamment du contenu qui défile dessous.
+  const [grantTop, setGrantTop] = useState(0);
   const pan = useMemo(() => new Animated.Value(0), []);
+
+  const listRef = useRef<FlatList<DraggableTrackItem>>(null);
+  // Valeurs lues dans les handlers de geste et l'auto-scroll (jamais pendant le rendu).
+  const scrollOffsetRef = useRef(0);
+  const scrollAtGrantRef = useRef(0);
+  const viewportHeightRef = useRef(0);
+  const panValueRef = useRef(0);
+  const draggingIndexRef = useRef<number | null>(null);
+  const dataLengthRef = useRef(items.length);
+  const autoScrollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Ordre affiché : source de vérité pendant un glisser (optimiste, posé au lâcher). On le
   // resynchronise sur `items` hors glisser, via le motif React « ajuster l'état pendant le
@@ -97,57 +111,157 @@ export function DraggableTrackList({
     setSyncedItems(items);
     setData(items);
   }
+  // Longueur courante lue par les handlers de geste : mise à jour hors rendu (règle react-hooks/refs).
+  useEffect(() => {
+    dataLengthRef.current = data.length;
+  });
+
+  /** Index survolé, déduit du doigt (pan) ET du défilement effectué depuis la saisie. */
+  const computeHover = (index: number) => {
+    const scrollDelta = scrollOffsetRef.current - scrollAtGrantRef.current;
+    const dy = panValueRef.current + scrollDelta;
+    return clamp(Math.round(index + dy / ROW_HEIGHT), 0, dataLengthRef.current - 1);
+  };
+
+  const stopAutoScroll = () => {
+    if (autoScrollTimer.current) {
+      clearInterval(autoScrollTimer.current);
+      autoScrollTimer.current = null;
+    }
+  };
+
+  /**
+   * Auto-scroll de bord : tant qu'un glisser est en cours, un tick regarde où est le doigt dans le
+   * viewport et fait défiler la liste par petits pas, en re-calculant l'index survolé (le contenu
+   * bouge sous un doigt immobile).
+   */
+  const startAutoScroll = (index: number, rowViewportTop: number) => {
+    stopAutoScroll();
+    autoScrollTimer.current = setInterval(() => {
+      const fingerY = rowViewportTop + panValueRef.current + ROW_HEIGHT / 2;
+      const viewport = viewportHeightRef.current;
+      if (viewport <= 0) {
+        return;
+      }
+      let step = 0;
+      if (fingerY < AUTO_SCROLL_EDGE) {
+        step = -AUTO_SCROLL_STEP;
+      } else if (fingerY > viewport - AUTO_SCROLL_EDGE) {
+        step = AUTO_SCROLL_STEP;
+      }
+      if (step === 0) {
+        return;
+      }
+      const contentHeight = dataLengthRef.current * ROW_HEIGHT;
+      const maxOffset = Math.max(0, contentHeight - viewport);
+      const next = clamp(scrollOffsetRef.current + step, 0, maxOffset);
+      if (next === scrollOffsetRef.current) {
+        return;
+      }
+      scrollOffsetRef.current = next;
+      listRef.current?.scrollToOffset({ offset: next, animated: false });
+      setHoverIndex((current) => {
+        const target = computeHover(index);
+        return current === target ? current : target;
+      });
+    }, 16);
+  };
 
   const startDrag = (index: number) => {
     selection();
     pan.setValue(0);
+    panValueRef.current = 0;
+    scrollAtGrantRef.current = scrollOffsetRef.current;
+    draggingIndexRef.current = index;
+    const rowViewportTop = index * ROW_HEIGHT - scrollOffsetRef.current;
+    setGrantTop(rowViewportTop);
     setDraggingIndex(index);
     setHoverIndex(index);
+    startAutoScroll(index, rowViewportTop);
   };
 
   const moveDrag = (index: number, dy: number) => {
     pan.setValue(dy);
-    const next = clamp(Math.round(index + dy / ROW_HEIGHT), 0, data.length - 1);
+    panValueRef.current = dy;
+    const next = computeHover(index);
     setHoverIndex((current) => (current === next ? current : next));
   };
 
   const endDrag = (index: number) => {
-    const to = hoverIndex ?? index;
+    stopAutoScroll();
+    const to = computeHover(index);
     if (to !== index) {
       tapLight();
       setData((current) => arrayMove(current, index, to));
       onMove(index, to);
     }
     pan.setValue(0);
+    panValueRef.current = 0;
+    draggingIndexRef.current = null;
     setDraggingIndex(null);
     setHoverIndex(null);
   };
 
+  // Sécurité : pas de timer orphelin si la liste est démontée en plein geste.
+  useEffect(() => stopAutoScroll, []);
+
+  const draggedItem = draggingIndex !== null ? data[draggingIndex] : null;
+
   return (
-    <ScrollView
-      scrollEnabled={draggingIndex === null}
-      showsVerticalScrollIndicator={false}
-      contentContainerStyle={{ height: data.length * ROW_HEIGHT + contentPaddingBottom }}
+    <View
+      style={styles.container}
+      onLayout={(e) => {
+        viewportHeightRef.current = e.nativeEvent.layout.height;
+      }}
     >
-      {data.map((item, index) => (
-        <DraggableRow
-          key={`${item.id}-${index}`}
-          item={item}
-          index={index}
-          isActive={item.id === activeTrackId}
-          isDragging={index === draggingIndex}
-          offset={rowOffset(index, draggingIndex, hoverIndex)}
-          dragTranslate={pan}
-          removeLabel={removeLabel}
-          onStartDrag={startDrag}
-          onMoveDrag={moveDrag}
-          onEndDrag={endDrag}
-          onPlay={() => onPlay(index)}
-          onRemove={() => onRemove(index)}
-          onLongPress={onLongPress ? () => onLongPress(index) : undefined}
-        />
-      ))}
-    </ScrollView>
+      <FlatList
+        ref={listRef}
+        data={data}
+        keyExtractor={(item) => item.id}
+        getItemLayout={(_d, index) => ({
+          length: ROW_HEIGHT,
+          offset: ROW_HEIGHT * index,
+          index,
+        })}
+        scrollEnabled={draggingIndex === null}
+        onScroll={(e) => {
+          scrollOffsetRef.current = e.nativeEvent.contentOffset.y;
+        }}
+        scrollEventThrottle={16}
+        windowSize={7}
+        initialNumToRender={12}
+        maxToRenderPerBatch={16}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: contentPaddingBottom }}
+        renderItem={({ item, index }) => (
+          <DraggableRow
+            item={item}
+            index={index}
+            isActive={item.id === activeTrackId}
+            isDragging={index === draggingIndex}
+            offset={rowOffset(index, draggingIndex, hoverIndex)}
+            removeLabel={removeLabel}
+            onStartDrag={startDrag}
+            onMoveDrag={moveDrag}
+            onEndDrag={endDrag}
+            onPlay={() => onPlay(index)}
+            onRemove={() => onRemove(index)}
+            onLongPress={onLongPress ? () => onLongPress(index) : undefined}
+          />
+        )}
+      />
+
+      {/* Clone de la ligne saisie : hors de la FlatList (overlay), il suit le doigt sans jamais
+          perturber la virtualisation. La ligne d'origine garde sa place, invisible. */}
+      {draggedItem && (
+        <Animated.View
+          pointerEvents="none"
+          style={[styles.dragOverlay, { top: grantTop, transform: [{ translateY: pan }] }]}
+        >
+          <RowContent item={draggedItem} isActive={draggedItem.id === activeTrackId} />
+        </Animated.View>
+      )}
+    </View>
   );
 }
 
@@ -171,7 +285,6 @@ type DraggableRowProps = {
   isActive: boolean;
   isDragging: boolean;
   offset: number;
-  dragTranslate: Animated.Value;
   removeLabel: string;
   onStartDrag: (index: number) => void;
   onMoveDrag: (index: number, dy: number) => void;
@@ -207,32 +320,20 @@ function DraggableRow(props: DraggableRowProps) {
   );
   /* eslint-enable react-hooks/refs */
 
-  const {
-    item,
-    index,
-    isActive,
-    isDragging,
-    offset,
-    dragTranslate,
-    removeLabel,
-    onPlay,
-    onRemove,
-    onLongPress,
-  } = props;
+  const { item, isActive, isDragging, offset, removeLabel, onPlay, onRemove, onLongPress } = props;
   const { title, artist, artworkUri } = item;
   const unavailable = item.unavailable ?? false;
 
   return (
-    <Animated.View
+    <View
       style={[
         styles.rowContainer,
-        { top: index * ROW_HEIGHT },
-        isDragging
-          ? { transform: [{ translateY: dragTranslate }], zIndex: 10, elevation: 8 }
-          : { transform: [{ translateY: offset }] },
+        // La ligne saisie reste montée (sa place est tenue) mais invisible : le clone en overlay
+        // la remplace visuellement. Les autres s'écartent pour ouvrir l'emplacement visé.
+        isDragging ? styles.rowHidden : { transform: [{ translateY: offset }] },
       ]}
     >
-      <View style={[styles.row, (isActive || isDragging) && styles.rowRaised]}>
+      <View style={[styles.row, isActive && styles.rowRaised]}>
         <Pressable
           onPress={unavailable ? undefined : onPlay}
           onLongPress={unavailable ? undefined : onLongPress}
@@ -282,7 +383,37 @@ function DraggableRow(props: DraggableRowProps) {
           <Icon name="drag_indicator" size={22} color={colors.textMuted} />
         </View>
       </View>
-    </Animated.View>
+    </View>
+  );
+}
+
+/**
+ * Clone visuel de la ligne saisie, rendu en overlay pendant un glisser : pochette + titres +
+ * indicateurs, sans aucune zone interactive (le clone est `pointerEvents="none"`).
+ */
+function RowContent({ item, isActive }: { item: DraggableTrackItem; isActive: boolean }) {
+  const { title, artist, artworkUri } = item;
+  const unavailable = item.unavailable ?? false;
+
+  return (
+    <View style={[styles.row, styles.rowRaised]}>
+      <View style={[styles.rowMain, unavailable && styles.rowMainUnavailable]}>
+        <Cover uri={artworkUri} />
+        <View style={styles.rowText}>
+          <Text style={[styles.rowTitle, isActive && styles.rowTitleActive]} numberOfLines={1}>
+            {title}
+          </Text>
+          <Text style={styles.rowMeta} numberOfLines={1}>
+            {unavailable ? `${artist} · indisponible` : artist}
+          </Text>
+        </View>
+        {isActive && !unavailable && <Icon name="graphic_eq" size={20} color={colors.accentIcon} />}
+        {unavailable && <Icon name="cloud_off" size={18} color={colors.textMuted} />}
+      </View>
+      <View style={styles.handle}>
+        <Icon name="drag_indicator" size={22} color={colors.textMuted} />
+      </View>
+    </View>
   );
 }
 
@@ -299,11 +430,22 @@ function Cover({ uri }: { uri: string | null }) {
 }
 
 const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
   rowContainer: {
+    height: ROW_HEIGHT,
+  },
+  rowHidden: {
+    opacity: 0,
+  },
+  dragOverlay: {
     position: 'absolute',
     left: 0,
     right: 0,
     height: ROW_HEIGHT,
+    zIndex: 10,
+    elevation: 8,
   },
   row: {
     flex: 1,
