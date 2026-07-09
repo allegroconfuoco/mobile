@@ -107,7 +107,7 @@ export default function PlaylistScreen() {
       return;
     }
     const startIndex = playableTracks.findIndex((t) => t.id === localTrack.id);
-    void playQueue(playableTracks, startIndex < 0 ? 0 : startIndex);
+    void playQueue(playableTracks, startIndex < 0 ? 0 : startIndex, `playlist:${id}`);
   };
 
   const confirmDelete = () => {
@@ -175,7 +175,7 @@ export default function PlaylistScreen() {
         </Text>
         {playableTracks.length > 0 && (
           <Pressable
-            onPress={() => void playQueue(playableTracks, 0)}
+            onPress={() => void playQueue(playableTracks, 0, `playlist:${id}`)}
             style={({ pressed }) => [styles.playButton, pressed && styles.playButtonPressed]}
             accessibilityRole="button"
             accessibilityLabel="Lire la playlist"

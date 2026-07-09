@@ -178,9 +178,11 @@ function LibraryContent({
   // Handlers stables (référence conservée entre rendus) : condition pour que le `memo` des lignes
   // de liste soit effectif — une closure recréée à chaque rendu invaliderait toutes les lignes.
   const playFromFiltered = useCallback(
-    // La file de lecture reprend exactement la liste filtrée affichée.
-    (index: number) => void playQueue(filteredTracks, index),
-    [playQueue, filteredTracks]
+    // La file de lecture reprend exactement la liste filtrée affichée. Contexte d'écoute (#25) :
+    // un lancement depuis une liste filtrée est une « recherche », sinon la bibliothèque.
+    (index: number) =>
+      void playQueue(filteredTracks, index, query.trim() !== '' ? 'search' : 'library'),
+    [playQueue, filteredTracks, query]
   );
   const openArtist = useCallback(
     (name: string) => router.push({ pathname: '/artist', params: { name } }),

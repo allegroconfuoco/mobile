@@ -12,6 +12,7 @@ import TrackPlayer, { Event, RepeatMode, State, type Track } from 'react-native-
 
 import { type LocalTrack } from '@/library/useAudioLibrary';
 import * as db from '@/library/db';
+import { setPlayContext, type PlayContext } from './playRecorder';
 import { ensurePlayerReady } from './setup';
 import { resolvePlayerTracks } from './track';
 import { planMoves, restoreOrder, shuffleAfter } from './shuffle';
@@ -56,8 +57,9 @@ export type PlayerActions = {
    * Charge `tracks` comme file de lecture et démarre à l'index `startIndex`.
    * Les titres dont l'URI est introuvable sont ignorés ; l'index de départ est réaligné
    * sur le titre réellement tapé pour rester juste malgré ces trous.
+   * `context` = provenance du lancement, enregistrée avec l'historique d'écoute (#25).
    */
-  playQueue: (tracks: LocalTrack[], startIndex: number) => Promise<void>;
+  playQueue: (tracks: LocalTrack[], startIndex: number, context?: PlayContext) => Promise<void>;
   togglePlayPause: () => Promise<void>;
   skipToNext: () => void;
   skipToPrevious: () => void;
@@ -203,11 +205,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const playQueue = useCallback(
-    (tracks: LocalTrack[], startIndex: number) =>
+    (tracks: LocalTrack[], startIndex: number, context?: PlayContext) =>
       enqueue(async () => {
         if (!(await ensurePlayerReady()) || tracks.length === 0) {
           return;
         }
+        // Posé avant `setQueue` : le `PlaybackActiveTrackChanged` qui suit ouvre la session
+        // d'écoute avec cette provenance (#25).
+        setPlayContext(context ?? null);
         // Android 13+ : sans elle, la notification média est masquée. Non bloquant (la lecture
         // démarre pendant que le dialogue système s'affiche), demandé au premier vrai besoin.
         requestNotificationPermission();

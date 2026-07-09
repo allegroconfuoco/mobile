@@ -81,7 +81,7 @@ export default function AlbumScreen() {
 
   // Handler stable pour les lignes mémoïsées (cf. TrackIndexRow).
   const playFrom = useCallback(
-    (index: number) => void playQueue(albumTracks, index),
+    (index: number) => void playQueue(albumTracks, index, 'album'),
     [playQueue, albumTracks]
   );
 

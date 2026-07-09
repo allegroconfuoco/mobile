@@ -2,6 +2,12 @@ import TrackPlayer, { Event, State } from 'react-native-track-player';
 
 import { smartPrevious } from './controls';
 import { notifyPlaybackError } from './playbackErrors';
+import {
+  recorderOnPause,
+  recorderOnProgressTick,
+  recorderOnQueueEnded,
+  recorderOnTrackChanged,
+} from './playRecorder';
 import { checkSleepTimer, sleepTimerOnTrackChanged } from './sleepTimer';
 
 /**
@@ -35,15 +41,27 @@ export async function PlaybackService(): Promise<void> {
     if (state === State.Playing) {
       consecutiveErrors = 0;
     }
+    // Historique d'écoute (#25) : une pause/arrêt écrit la session en cours sans la clore (une
+    // reprise cumulera sur la même ligne). Couvre aussi un kill de l'app pendant une pause :
+    // l'écoute déjà faite est en base.
+    if (state === State.Paused || state === State.Stopped) {
+      recorderOnPause();
+    }
   });
 
   // Minuteur de sommeil : vérifié ici (le service vit en arrière-plan, un setTimeout long serait
-  // throttlé). Le tick de progression est déjà émis toutes les secondes (`setup.ts`).
-  TrackPlayer.addEventListener(Event.PlaybackProgressUpdated, () => void checkSleepTimer());
-  TrackPlayer.addEventListener(
-    Event.PlaybackActiveTrackChanged,
-    () => void sleepTimerOnTrackChanged()
-  );
+  // throttlé). Le tick de progression est déjà émis toutes les secondes (`setup.ts`) ; le même
+  // tick alimente le temps écouté de l'historique (#25).
+  TrackPlayer.addEventListener(Event.PlaybackProgressUpdated, ({ duration }) => {
+    recorderOnProgressTick(duration);
+    void checkSleepTimer();
+  });
+  TrackPlayer.addEventListener(Event.PlaybackActiveTrackChanged, ({ track }) => {
+    recorderOnTrackChanged(track);
+    void sleepTimerOnTrackChanged();
+  });
+  // Fin de file (hors répétition) : rien ne suivra, on clôt la session d'écoute (#25).
+  TrackPlayer.addEventListener(Event.PlaybackQueueEnded, () => recorderOnQueueEnded());
 
   TrackPlayer.addEventListener(Event.PlaybackError, (e) => {
     console.warn('[player] erreur de lecture', e);

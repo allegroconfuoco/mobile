@@ -40,7 +40,7 @@ export default function FavoritesScreen() {
 
   // Handler stable pour les lignes mémoïsées (cf. TrackIndexRow).
   const playFrom = useCallback(
-    (index: number) => void playQueue(tracks, index),
+    (index: number) => void playQueue(tracks, index, 'favorites'),
     [playQueue, tracks]
   );
 
@@ -61,7 +61,7 @@ export default function FavoritesScreen() {
         {tracks.length > 0 && (
           <PressableScale
             haptic
-            onPress={() => void playQueue(tracks, 0)}
+            onPress={() => void playQueue(tracks, 0, 'favorites')}
             style={styles.playButton}
             accessibilityRole="button"
             accessibilityLabel="Lire les favoris"

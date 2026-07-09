@@ -61,7 +61,10 @@ export default function ArtistScreen() {
   }, [queue]);
 
   // Handler stable pour les lignes mémoïsées (cf. TrackIndexRow).
-  const playFrom = useCallback((index: number) => void playQueue(queue, index), [playQueue, queue]);
+  const playFrom = useCallback(
+    (index: number) => void playQueue(queue, index, 'artist'),
+    [playQueue, queue]
+  );
 
   const [actionsOpen, setActionsOpen] = useState(false);
 
