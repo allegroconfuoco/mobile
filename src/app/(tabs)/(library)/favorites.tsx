@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from 'react';
-import { FlatList, StyleSheet, Text, View } from 'react-native';
+import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
@@ -19,7 +19,7 @@ import { usePlayback } from '@/player/usePlayback';
 export default function FavoritesScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { tracksById } = useLibrary();
+  const { tracksById, refreshing, rescan } = useLibrary();
   const { favoriteIds } = useFavorites();
   const { playQueue } = usePlayer();
   const { track: activeTrack } = usePlayback();
@@ -78,6 +78,15 @@ export default function FavoritesScreen() {
         windowSize={7}
         initialNumToRender={12}
         maxToRenderPerBatch={16}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={rescan}
+            tintColor={colors.accent}
+            colors={[colors.accent]}
+            progressBackgroundColor={colors.surface}
+          />
+        }
         renderItem={({ item, index }) => (
           <TrackIndexRow
             track={item}

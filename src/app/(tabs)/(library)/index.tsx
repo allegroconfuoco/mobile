@@ -4,6 +4,7 @@ import {
   FlatList,
   Linking,
   Pressable,
+  RefreshControl,
   StyleSheet,
   Text,
   View,
@@ -129,6 +130,30 @@ export default function LibraryScreen() {
 type LibraryContextValue = ReturnType<typeof useLibrary>;
 
 /** Contenu selon la vue active (bibliothèque prête et non vide). */
+/** RefreshControl aux couleurs Forge (pull-to-refresh). */
+function themedRefresh(refreshing: boolean, onRefresh: () => void) {
+  return (
+    <RefreshControl
+      refreshing={refreshing}
+      onRefresh={onRefresh}
+      tintColor={colors.accent}
+      colors={[colors.accent]}
+      progressBackgroundColor={colors.surface}
+    />
+  );
+}
+
+/** Cycle de tri des morceaux : titre → artiste → ajouts récents. */
+function nextSort(sort: TrackSort): TrackSort {
+  if (sort === 'title') {
+    return 'artist';
+  }
+  if (sort === 'artist') {
+    return 'recent';
+  }
+  return 'title';
+}
+
 function LibraryContent({
   view,
   query,
@@ -138,7 +163,7 @@ function LibraryContent({
   query: string;
   library: LibraryContextValue;
 }) {
-  const { tracks, artists, albums, trackSort, setTrackSort } = library;
+  const { tracks, artists, albums, trackSort, setTrackSort, refreshing, rescan } = library;
   const router = useRouter();
   const { playQueue } = usePlayer();
   const { track: activeTrack } = usePlayback();
@@ -175,15 +200,31 @@ function LibraryContent({
           query={query}
           activeId={activeTrack?.id}
           sort={trackSort}
-          onToggleSort={() => setTrackSort(trackSort === 'title' ? 'artist' : 'title')}
+          onToggleSort={() => setTrackSort(nextSort(trackSort))}
           onPlay={playFromFiltered}
           onLongPress={trackMenu.open}
+          refreshing={refreshing}
+          onRefresh={rescan}
         />
       )}
       {view === 'artists' && (
-        <ArtistsView artists={filteredArtists} query={query} onOpen={openArtist} />
+        <ArtistsView
+          artists={filteredArtists}
+          query={query}
+          onOpen={openArtist}
+          refreshing={refreshing}
+          onRefresh={rescan}
+        />
       )}
-      {view === 'albums' && <AlbumsView albums={filteredAlbums} query={query} onOpen={openAlbum} />}
+      {view === 'albums' && (
+        <AlbumsView
+          albums={filteredAlbums}
+          query={query}
+          onOpen={openAlbum}
+          refreshing={refreshing}
+          onRefresh={rescan}
+        />
+      )}
       {view === 'playlists' && <PlaylistsView query={query} />}
 
       {trackMenu.element}
@@ -196,6 +237,8 @@ function PlaylistsView({ query }: { query: string }) {
   const router = useRouter();
   const { playlists, createPlaylist } = usePlaylistsContext();
   const { favoriteIds } = useFavorites();
+  // Ici, tirer pour rafraîchir = synchroniser les playlists (pas re-scanner les fichiers).
+  const { status: syncStatus, syncNow } = useSync();
   const [creating, setCreating] = useState(false);
 
   // Filtre sur le nom (même repli d'accents que le reste de la recherche).
@@ -213,6 +256,7 @@ function PlaylistsView({ query }: { query: string }) {
       <FlatList
         data={filtered}
         keyExtractor={(playlist) => playlist.id}
+        refreshControl={themedRefresh(syncStatus === 'syncing', () => void syncNow())}
         // Pendant une recherche, on masque Favoris + création pour ne montrer que les résultats.
         ListHeaderComponent={
           isSearching ? null : (
@@ -301,6 +345,8 @@ function TracksView({
   onToggleSort,
   onPlay,
   onLongPress,
+  refreshing,
+  onRefresh,
 }: {
   tracks: LocalTrack[];
   query: string;
@@ -309,6 +355,8 @@ function TracksView({
   onToggleSort: () => void;
   onPlay: (index: number) => void;
   onLongPress: (track: LocalTrack) => void;
+  refreshing: boolean;
+  onRefresh: () => void;
 }) {
   const renderItem = useCallback(
     ({ item, index }: { item: LocalTrack; index: number }) => (
@@ -336,6 +384,7 @@ function TracksView({
         windowSize={7}
         initialNumToRender={12}
         maxToRenderPerBatch={16}
+        refreshControl={themedRefresh(refreshing, onRefresh)}
         ListEmptyComponent={query ? <NoResults query={query} /> : null}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
@@ -344,9 +393,9 @@ function TracksView({
   );
 }
 
-/** Barre de tri de la liste des morceaux (bascule titre / artiste). */
+/** Barre de tri de la liste des morceaux (cycle titre / artiste / ajouts récents). */
 function SortBar({ sort, onToggle }: { sort: TrackSort; onToggle: () => void }) {
-  const label = sort === 'title' ? 'Titre' : 'Artiste';
+  const label = sort === 'title' ? 'Titre' : sort === 'artist' ? 'Artiste' : 'Ajouts récents';
   return (
     <Pressable
       onPress={onToggle}
@@ -398,10 +447,14 @@ function ArtistsView({
   artists,
   query,
   onOpen,
+  refreshing,
+  onRefresh,
 }: {
   artists: ArtistGroup[];
   query: string;
   onOpen: (name: string) => void;
+  refreshing: boolean;
+  onRefresh: () => void;
 }) {
   const renderItem = useCallback(
     ({ item }: { item: ArtistGroup }) => <ArtistRow artist={item} onOpen={onOpen} />,
@@ -416,6 +469,7 @@ function ArtistsView({
       windowSize={7}
       initialNumToRender={12}
       maxToRenderPerBatch={16}
+      refreshControl={themedRefresh(refreshing, onRefresh)}
       ListEmptyComponent={query ? <NoResults query={query} /> : null}
       renderItem={renderItem}
       contentContainerStyle={styles.listContent}
@@ -462,10 +516,14 @@ function AlbumsView({
   albums,
   query,
   onOpen,
+  refreshing,
+  onRefresh,
 }: {
   albums: AlbumGroup[];
   query: string;
   onOpen: (album: AlbumGroup) => void;
+  refreshing: boolean;
+  onRefresh: () => void;
 }) {
   const renderItem = useCallback(
     ({ item }: { item: AlbumGroup }) => <AlbumTile album={item} onOpen={onOpen} />,
@@ -481,6 +539,7 @@ function AlbumsView({
       windowSize={5}
       initialNumToRender={8}
       maxToRenderPerBatch={8}
+      refreshControl={themedRefresh(refreshing, onRefresh)}
       ListEmptyComponent={query ? <NoResults query={query} /> : null}
       renderItem={renderItem}
       contentContainerStyle={styles.albumsContent}

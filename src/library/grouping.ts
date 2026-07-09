@@ -417,13 +417,16 @@ export function filterAlbums(albums: AlbumGroup[], query: string): AlbumGroup[] 
 }
 
 /** Critère de tri de la liste des morceaux. */
-export type TrackSort = 'title' | 'artist';
+export type TrackSort = 'title' | 'artist' | 'recent';
 
-/** Trie une copie des pistes par titre ou par artiste (puis titre). */
+/** Trie une copie des pistes par titre, artiste (puis titre), ou date d'ajout (récent d'abord). */
 export function sortTracks(tracks: LocalTrack[], sort: TrackSort): LocalTrack[] {
   const copy = [...tracks];
   if (sort === 'artist') {
     copy.sort((a, b) => compare(artistOf(a), artistOf(b)) || compare(a.title, b.title));
+  } else if (sort === 'recent') {
+    // Date d'ajout manquante = relégué en fin, départagé par titre pour un ordre stable.
+    copy.sort((a, b) => (b.creationTime ?? 0) - (a.creationTime ?? 0) || compare(a.title, b.title));
   } else {
     copy.sort((a, b) => compare(a.title, b.title));
   }

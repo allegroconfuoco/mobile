@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import {
   type AssetMetadata,
   Asset,
@@ -51,6 +51,8 @@ export type LocalTrack = {
   discNo: number | null;
   /** URI `file://` d'une pochette extraite en cache au scan, ou `null`. */
   artworkUri: string | null;
+  /** Date d'ajout au media store (ms), ou `null` — sert au tri « Ajouts récents ». */
+  creationTime: number | null;
   /** MBID résolu par l'enrichissement MusicBrainz (issue #19), ou `null`. */
   mbid: string | null;
   /** URL de pochette distante (Cover Art Archive) issue de l'enrichissement, repli d'affichage. */
@@ -155,6 +157,7 @@ function rowToTrack(r: db.TrackRow): LocalTrack {
     trackNo: r.trackNo,
     discNo: r.discNo,
     artworkUri: r.artworkUri,
+    creationTime: r.creationTime,
     mbid: r.mbid,
     coverArtUrl: r.coverArtUrl,
   };
@@ -310,7 +313,15 @@ export function useAudioLibrary(): UseAudioLibrary {
   // Passe 2 (tags) en cours : la biblio est affichable mais ses métadonnées s'affinent encore.
   const [tagging, setTagging] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [trackSort, setTrackSort] = useState<TrackSort>('title');
+  // Tri persisté (lot 8) : survivait auparavant à la session seulement.
+  const [trackSort, setTrackSortState] = useState<TrackSort>(() => {
+    const saved = db.getSetting('library.sort');
+    return saved === 'artist' || saved === 'recent' ? saved : 'title';
+  });
+  const setTrackSort = useCallback((sort: TrackSort) => {
+    setTrackSortState(sort);
+    db.setSetting('library.sort', sort);
+  }, []);
 
   // Numéro de scan : un nouveau scan rend périmée la passe de tags du précédent (elle s'arrête).
   const scanSeq = useRef(0);
@@ -401,6 +412,27 @@ export function useAudioLibrary(): UseAudioLibrary {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       void scan();
     }
+  }, [permission?.granted, scan]);
+
+  // Rescan incrémental (bon marché : diff par id) au retour de l'app au premier plan — des
+  // fichiers ont pu être ajoutés entre-temps. Débouncé : pas plus d'un scan toutes les 30 s.
+  const lastForegroundScanRef = useRef(0);
+  useEffect(() => {
+    if (!isSupported || !permission?.granted) {
+      return;
+    }
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') {
+        return;
+      }
+      const now = Date.now();
+      if (now - lastForegroundScanRef.current < 30_000) {
+        return;
+      }
+      lastForegroundScanRef.current = now;
+      void scan();
+    });
+    return () => sub.remove();
   }, [permission?.granted, scan]);
 
   const isIncluded = useCallback((folder: string) => folderPrefs[folder] ?? true, [folderPrefs]);
