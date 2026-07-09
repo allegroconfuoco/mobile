@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Pressable, SectionList, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -8,6 +8,7 @@ import { BackButton } from '@/components/BackButton';
 import { Icon } from '@/components/Icon';
 import { TrackCover } from '@/components/TrackCover';
 import { TrackIndexRow } from '@/components/TrackRow';
+import { QuickActionsSheet, type QuickAction } from '@/components/QuickActionsSheet';
 import { useTrackActionsMenu } from '@/components/useTrackActionsMenu';
 import {
   groupAlbumRowsByDisc,
@@ -96,6 +97,30 @@ export default function AlbumScreen() {
       pathname: '/write-tags',
       params: { scope: 'album', albumArtist: artist, album: title, label: title },
     });
+  const cleanupTitles = () =>
+    router.push({
+      pathname: '/title-cleanup',
+      params: { albumArtist: artist, album: title, label: title },
+    });
+
+  // Actions d'en-tête regroupées derrière un unique « … » (lot 11) au lieu d'une rangée d'icônes.
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const headerActions: QuickAction[] = [
+    ...(isUnknownBucket
+      ? [
+          {
+            icon: 'auto_fix_high',
+            label: 'Ranger les titres via MusicBrainz',
+            onPress: sortUnknown,
+          } as QuickAction,
+        ]
+      : [
+          { icon: 'travel_explore', label: 'Identifier l’album', onPress: identify } as QuickAction,
+        ]),
+    { icon: 'group', label: 'Modifier les artistes', onPress: editArtists },
+    { icon: 'save', label: 'Écrire les tags dans les fichiers', onPress: writeToFiles },
+    { icon: 'delete_sweep', label: 'Nettoyer les titres', onPress: cleanupTitles },
+  ];
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + spacing.sm }]}>
@@ -103,44 +128,14 @@ export default function AlbumScreen() {
         <BackButton onPress={() => router.back()} />
         <View style={styles.topActions}>
           <Pressable
-            onPress={editArtists}
+            onPress={() => setActionsOpen(true)}
             hitSlop={12}
             style={styles.identifyButton}
             accessibilityRole="button"
-            accessibilityLabel="Modifier les artistes de l’album"
+            accessibilityLabel="Actions sur l’album"
           >
-            <Icon name="group" size={24} color={colors.textPrimary} />
+            <Icon name="more_horiz" size={24} color={colors.textPrimary} />
           </Pressable>
-          <Pressable
-            onPress={writeToFiles}
-            hitSlop={12}
-            style={styles.identifyButton}
-            accessibilityRole="button"
-            accessibilityLabel="Écrire l’album dans les fichiers"
-          >
-            <Icon name="save" size={24} color={colors.textPrimary} />
-          </Pressable>
-          {isUnknownBucket ? (
-            <Pressable
-              onPress={sortUnknown}
-              hitSlop={12}
-              style={styles.identifyButton}
-              accessibilityRole="button"
-              accessibilityLabel="Ranger les titres via MusicBrainz"
-            >
-              <Icon name="auto_fix_high" size={24} color={colors.textPrimary} />
-            </Pressable>
-          ) : (
-            <Pressable
-              onPress={identify}
-              hitSlop={12}
-              style={styles.identifyButton}
-              accessibilityRole="button"
-              accessibilityLabel="Identifier l’album"
-            >
-              <Icon name="travel_explore" size={24} color={colors.textPrimary} />
-            </Pressable>
-          )}
         </View>
       </View>
 
@@ -214,6 +209,13 @@ export default function AlbumScreen() {
       />
 
       {trackMenu.element}
+
+      <QuickActionsSheet
+        visible={actionsOpen}
+        title={title}
+        actions={headerActions}
+        onClose={() => setActionsOpen(false)}
+      />
     </View>
   );
 }

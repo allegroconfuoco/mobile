@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Pressable, SectionList, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -7,6 +7,7 @@ import { colors, spacing, typography } from '@/theme';
 import { BackButton } from '@/components/BackButton';
 import { Icon } from '@/components/Icon';
 import { TrackIndexRow } from '@/components/TrackRow';
+import { QuickActionsSheet } from '@/components/QuickActionsSheet';
 import { useTrackActionsMenu } from '@/components/useTrackActionsMenu';
 import {
   buildAlbums,
@@ -62,23 +63,21 @@ export default function ArtistScreen() {
   // Handler stable pour les lignes mémoïsées (cf. TrackIndexRow).
   const playFrom = useCallback((index: number) => void playQueue(queue, index), [playQueue, queue]);
 
+  const [actionsOpen, setActionsOpen] = useState(false);
+
   return (
     <View style={[styles.screen, { paddingTop: insets.top + spacing.sm }]}>
       <View style={styles.topBar}>
         <BackButton onPress={() => router.back()} />
+        {/* Actions d'en-tête regroupées derrière « … » (lot 11). */}
         <Pressable
-          onPress={() =>
-            router.push({
-              pathname: '/write-tags',
-              params: { scope: 'artist', artist: name, label: name },
-            })
-          }
+          onPress={() => setActionsOpen(true)}
           hitSlop={12}
           style={styles.writeButton}
           accessibilityRole="button"
-          accessibilityLabel="Écrire les titres de l’artiste dans les fichiers"
+          accessibilityLabel="Actions sur l’artiste"
         >
-          <Icon name="save" size={24} color={colors.textPrimary} />
+          <Icon name="more_horiz" size={24} color={colors.textPrimary} />
         </Pressable>
       </View>
 
@@ -127,6 +126,29 @@ export default function ArtistScreen() {
       />
 
       {trackMenu.element}
+
+      <QuickActionsSheet
+        visible={actionsOpen}
+        title={name}
+        onClose={() => setActionsOpen(false)}
+        actions={[
+          {
+            icon: 'save',
+            label: 'Écrire les tags dans les fichiers',
+            onPress: () =>
+              router.push({
+                pathname: '/write-tags',
+                params: { scope: 'artist', artist: name, label: name },
+              }),
+          },
+          {
+            icon: 'delete_sweep',
+            label: 'Nettoyer les titres',
+            onPress: () =>
+              router.push({ pathname: '/title-cleanup', params: { artist: name, label: name } }),
+          },
+        ]}
+      />
     </View>
   );
 }

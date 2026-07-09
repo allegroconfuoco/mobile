@@ -112,8 +112,8 @@ export default function SettingsScreen() {
     },
     {
       icon: 'edit_note',
-      label: 'Édition des fichiers',
-      hint: 'Associer un artiste, dissocier des albums',
+      label: 'Métadonnées & fichiers',
+      hint: 'Tags, artistes, albums, nettoyage des titres',
       href: '/file-editing',
     },
     {

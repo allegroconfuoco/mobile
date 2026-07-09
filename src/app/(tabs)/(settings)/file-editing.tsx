@@ -1,6 +1,7 @@
 /**
- * Hub **Édition des fichiers** (Réglages) — regroupe les outils d'édition des tags qui écrivent
- * directement dans les fichiers (write-back ID3), en lot.
+ * Hub **Métadonnées & fichiers** (Réglages, lot 11) — regroupe les outils d'édition des tags qui
+ * écrivent directement dans les fichiers (write-back ID3), en lot, plus un état de
+ * l'enrichissement MusicBrainz (compteurs par statut).
  *
  * Choix de périmètre acté avec l'utilisateur : ces outils **gravent dans les MP3** (fichiers propres,
  * data-ownership), pas un overlay réversible. La réversibilité passe par la restauration des tags
@@ -10,17 +11,25 @@
  * infos, identifier/rattacher un album, écrire les tags, modifier les artistes) : on ne les duplique
  * pas ici, mais les écrans en lot acceptent aussi une sélection d'un seul élément (« singulier »).
  */
+import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { type Href, useRouter } from 'expo-router';
 
 import { BackButton } from '@/components/BackButton';
 import { Icon, type IconName } from '@/components/Icon';
+import * as db from '@/library/db';
 import { colors, fontFamily, radii, spacing, typography } from '@/theme';
 
 type Tool = { icon: IconName; label: string; hint: string; href: Href };
 
 const TOOLS: Tool[] = [
+  {
+    icon: 'save',
+    label: 'Écrire les tags de la bibliothèque',
+    hint: 'Revue avant gravure, toutes les pistes',
+    href: { pathname: '/write-tags', params: { scope: 'library' } },
+  },
   {
     icon: 'person_add',
     label: 'Associer un artiste',
@@ -34,7 +43,7 @@ const TOOLS: Tool[] = [
     href: '/bulk-dissociate-albums',
   },
   {
-    icon: 'auto_fix_high',
+    icon: 'delete_sweep',
     label: 'Nettoyer les titres',
     hint: 'Retirer parenthèses, n° de piste, préfixe artiste… (motifs personnalisables)',
     href: '/title-cleanup',
@@ -44,13 +53,16 @@ const TOOLS: Tool[] = [
 export default function FileEditingScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  // Compteurs lus une fois au montage (initialiseur paresseux, requête agrégée légère).
+  const [stats] = useState<db.EnrichmentStats>(() => db.enrichmentStats());
+  const enriched = stats.confirmed + stats.matched;
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + spacing.md }]}>
       <View style={styles.header}>
         <BackButton onPress={() => router.back()} />
         <Text style={styles.title} numberOfLines={1}>
-          Édition des fichiers
+          Métadonnées &amp; fichiers
         </Text>
       </View>
 
@@ -59,6 +71,18 @@ export default function FileEditingScreen() {
           Ces outils écrivent les tags directement dans tes fichiers. À la première écriture, les
           tags d’origine sont sauvegardés : tu pourras restaurer une piste.
         </Text>
+
+        {enriched + stats.nomatch + stats.skipped > 0 && (
+          <View style={styles.stats}>
+            <Icon name="travel_explore" size={18} color={colors.accentLabel} />
+            <Text style={styles.statsText}>
+              MusicBrainz : {enriched} identifié{enriched > 1 ? 's' : ''}
+              {stats.confirmed > 0 ? ` (dont ${stats.confirmed} validés à la main)` : ''} ·{' '}
+              {stats.nomatch} sans correspondance
+              {stats.skipped > 0 ? ` · ${stats.skipped} ignorés` : ''}
+            </Text>
+          </View>
+        )}
 
         <View style={styles.list}>
           {TOOLS.map((tool) => (
@@ -107,6 +131,24 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     lineHeight: 19,
     marginBottom: spacing.lg,
+  },
+  stats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.borderFaint,
+    marginBottom: spacing.lg,
+  },
+  statsText: {
+    flex: 1,
+    fontFamily: fontFamily.medium,
+    fontSize: 12,
+    color: colors.textMuted,
+    lineHeight: 17,
   },
   list: {
     gap: spacing.sm,
