@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import {
   type AssetMetadata,
@@ -161,11 +161,12 @@ function rowToTrack(r: db.TrackRow): LocalTrack {
 }
 
 /**
- * Résout le dossier et les tags ID3 d'un lot de nouvelles pistes, en parallèle borné.
+ * Passe 1 du scan : résout l'URI et le dossier d'un lot de nouvelles pistes, en parallèle borné.
  *
- * L'URI (via `getUri`) sert à la fois à déduire le dossier et à lire les tags : une seule
- * résolution par piste. L'extraction des tags est synchrone (lecture partielle du fichier) et
- * peuple aussi le cache mémoire de `trackTags`, donc l'affichage n'a plus besoin de relire.
+ * Les tags ne sont **pas** lus ici (lot 5 de l'audit) : leur extraction est synchrone (parse ID3
+ * + écriture de la pochette sur disque) et bloquait le thread JS pendant tout un premier scan.
+ * La passe 1 insère les lignes avec le repli nom-de-fichier (`toRow` s'en charge) pour afficher
+ * la bibliothèque vite ; la passe 2 (`extractTagsInBatches`) enrichit ensuite en fond.
  */
 async function resolveRows(metas: AssetMetadata[]): Promise<db.TrackRow[]> {
   const rows = new Array<db.TrackRow>(metas.length);
@@ -176,21 +177,52 @@ async function resolveRows(metas: AssetMetadata[]): Promise<db.TrackRow[]> {
       const meta = metas[idx];
       let uri: string | null = null;
       let folder = '';
-      let tags = NO_TAGS;
       try {
         uri = await new Asset(meta.id).getUri();
         folder = folderOf(uri);
-        tags = extractTrackTags(meta.id, uri);
       } catch (e) {
-        console.warn('[useAudioLibrary] URI/tags introuvables', e);
+        console.warn('[useAudioLibrary] URI introuvable', e);
       }
-      rows[idx] = toRow(meta, folder, uri, tags);
+      rows[idx] = toRow(meta, folder, uri, NO_TAGS);
     }
   };
   await Promise.all(
     Array.from({ length: Math.min(RESOLVE_CONCURRENCY, metas.length) }, () => worker())
   );
   return rows;
+}
+
+/** Taille de lot de la passe 2 : assez petit pour garder le thread JS réactif entre deux yields. */
+const TAG_BATCH = 15;
+
+/**
+ * Passe 2 du scan : extraction des tags ID3 + pochettes, par lots avec **yield JS** entre chaque
+ * lot. L'extraction reste synchrone piste par piste (parse + JPEG), mais découpée elle laisse
+ * respirer l'UI. Peuple aussi le cache mémoire de `trackTags` (l'affichage n'a plus à relire).
+ * `isStale` coupe la passe si un nouveau scan a démarré entre-temps.
+ */
+async function extractTagsInBatches(
+  rows: db.TrackRow[],
+  isStale: () => boolean,
+  onBatch: () => void
+): Promise<void> {
+  for (let i = 0; i < rows.length; i += TAG_BATCH) {
+    if (isStale()) {
+      return;
+    }
+    for (const row of rows.slice(i, i + TAG_BATCH)) {
+      if (!row.uri) {
+        continue;
+      }
+      try {
+        db.updateScannedTags(row.id, extractTrackTags(row.id, row.uri));
+      } catch (e) {
+        console.warn('[useAudioLibrary] extraction des tags échouée', e);
+      }
+    }
+    onBatch();
+    await new Promise<void>((resolve) => setTimeout(resolve));
+  }
 }
 
 function prefsToMap(prefs: db.FolderPref[]): Record<string, boolean> {
@@ -221,6 +253,12 @@ type UseAudioLibrary = {
   tracksById: Map<string, LocalTrack>;
   /** Un scan de fond tourne alors qu'un cache est déjà affiché. */
   refreshing: boolean;
+  /**
+   * La passe de fond d'extraction des tags (passe 2 du scan) est en cours : la bibliothèque est
+   * affichable mais des titres/pochettes s'affinent encore. L'enrichissement MusicBrainz doit
+   * attendre sa fin (il a besoin des vrais tags, pas des noms de fichiers).
+   */
+  tagging: boolean;
   error: string | null;
   /** Dossiers détectés, avec compteur et état d'inclusion (écran réglages). */
   folders: LibraryFolder[];
@@ -269,15 +307,22 @@ export function useAudioLibrary(): UseAudioLibrary {
     () => new Set(db.loadExcludedTracks())
   );
   const [scanning, setScanning] = useState(false);
+  // Passe 2 (tags) en cours : la biblio est affichable mais ses métadonnées s'affinent encore.
+  const [tagging, setTagging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [trackSort, setTrackSort] = useState<TrackSort>('title');
+
+  // Numéro de scan : un nouveau scan rend périmée la passe de tags du précédent (elle s'arrête).
+  const scanSeq = useRef(0);
 
   const scan = useCallback(async () => {
     if (!isSupported) {
       return;
     }
+    const seq = ++scanSeq.current;
     setScanning(true);
     setError(null);
+    let toTag: db.TrackRow[] = [];
     try {
       const results = await new Query()
         .eq(AssetField.MEDIA_TYPE, MediaType.AUDIO)
@@ -312,11 +357,40 @@ export function useAudioLibrary(): UseAudioLibrary {
       setAllTracks(db.loadTracks());
       setFolderPrefs(prefsToMap(db.loadFolderPrefs()));
       setExcludedIds(new Set(db.loadExcludedTracks()));
+      toTag = newRows;
     } catch (e) {
       console.warn('[useAudioLibrary] scan failed', e);
       setError('Le scan de la bibliothèque a échoué.');
     } finally {
       setScanning(false);
+    }
+
+    // Passe 2 : tags + pochettes en fond, la biblio étant déjà affichée (titres = nom de fichier
+    // en attendant). Reloads throttlés : `loadTracks` est un JOIN complet, on ne le rejoue pas
+    // tous les 15 titres sur une grosse bibliothèque.
+    if (toTag.length === 0 || seq !== scanSeq.current) {
+      return;
+    }
+    setTagging(true);
+    let lastReload = 0;
+    try {
+      await extractTagsInBatches(
+        toTag,
+        () => seq !== scanSeq.current,
+        () => {
+          const now = Date.now();
+          if (now - lastReload >= 2500) {
+            lastReload = now;
+            setAllTracks(db.loadTracks());
+          }
+        }
+      );
+    } finally {
+      if (seq === scanSeq.current) {
+        // Reload final inconditionnel : le dernier lot doit toujours être visible.
+        setAllTracks(db.loadTracks());
+      }
+      setTagging(false);
     }
   }, []);
 
@@ -427,7 +501,8 @@ export function useAudioLibrary(): UseAudioLibrary {
     artists,
     albums,
     tracksById,
-    refreshing: scanning && hasCache,
+    refreshing: (scanning && hasCache) || tagging,
+    tagging,
     error,
     folders,
     excludedTracks,
