@@ -71,6 +71,8 @@ export type IconName =
   | 'settings_backup_restore'
   | 'delete_sweep'
   | 'timer'
+  | 'history'
+  | 'visibility_off'
   | 'logout';
 
 type IconProps = {

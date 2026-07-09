@@ -18,6 +18,7 @@ import { reportBottomChromeHeight } from '@/lib/bottomChrome';
 /** Icône associée à chaque route de la tab bar (clé = nom du groupe/onglet). */
 const TAB_ICONS: Record<string, IconName> = {
   '(library)': 'library_music',
+  '(stats)': 'graphic_eq',
   '(settings)': 'settings',
 };
 

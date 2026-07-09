@@ -8,6 +8,7 @@ export default function TabsLayout() {
       {/* Chaque onglet est un Stack (groupe entre parenthèses, invisible dans l'URL) : les écrans de
           détail y sont poussés en gardant la tab bar + le mini-player visibles. */}
       <Tabs.Screen name="(library)" options={{ title: 'Biblio' }} />
+      <Tabs.Screen name="(stats)" options={{ title: 'Écoutes' }} />
       <Tabs.Screen name="(settings)" options={{ title: 'Réglages' }} />
     </Tabs>
   );

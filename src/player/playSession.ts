@@ -14,7 +14,14 @@ import type { Track } from 'react-native-track-player';
 
 /** Provenance d'un lancement de lecture (métrique « contexte d'écoute » de #25). */
 export type PlayContext =
-  'library' | 'search' | 'album' | 'artist' | 'favorites' | 'queue' | `playlist:${string}`;
+  | 'library'
+  | 'search'
+  | 'album'
+  | 'artist'
+  | 'favorites'
+  | 'queue'
+  | 'history'
+  | `playlist:${string}`;
 
 /** Un événement d'écoute prêt à persister — sans l'id partagé, résolu par la couche base. */
 export type PlayDraft = {
