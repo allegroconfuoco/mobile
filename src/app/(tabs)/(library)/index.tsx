@@ -32,6 +32,7 @@ import {
 import { useLibrary } from '@/library/LibraryProvider';
 import { usePlaylistsContext } from '@/library/PlaylistsProvider';
 import { useFavorites } from '@/library/FavoritesProvider';
+import { useSync } from '@/sync/SyncProvider';
 import { usePlayer } from '@/player/PlayerProvider';
 import { usePlayback } from '@/player/usePlayback';
 
@@ -56,10 +57,15 @@ const SEARCH_PLACEHOLDER: Record<LibraryView, string> = {
 /** Onglet Bibliothèque : morceaux / artistes / albums de la musique locale. */
 export default function LibraryScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const library = useLibrary();
   const { status, tracks, refreshing, error, rescan } = library;
+  const { lastSync } = useSync();
   const [view, setView] = useState<LibraryView>('tracks');
   const [query, setQuery] = useState('');
+
+  // Indicateur hors-ligne discret (lot 6) : la dernière tentative de synchro a échoué.
+  const syncTrouble = lastSync !== null && lastSync.result !== 'ok';
 
   const subtitle = useMemo(() => {
     if (refreshing) {
@@ -81,10 +87,22 @@ export default function LibraryScreen() {
           <Text style={styles.title}>Bibliothèque</Text>
           <Text style={styles.subtitle}>{subtitle}</Text>
         </View>
+        {syncTrouble && (
+          <Pressable
+            onPress={() => router.push('/settings')}
+            hitSlop={12}
+            style={styles.headerAction}
+            accessibilityRole="button"
+            accessibilityLabel="Synchronisation en attente — ouvrir les réglages"
+          >
+            <Icon name="cloud_off" size={24} color={colors.textMuted} />
+          </Pressable>
+        )}
         {status === 'ready' && (
           <Pressable
             onPress={rescan}
             hitSlop={12}
+            style={styles.headerAction}
             accessibilityRole="button"
             accessibilityLabel="Relancer le scan"
           >
@@ -588,8 +606,12 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'flex-start',
+    gap: spacing.lg,
     paddingHorizontal: spacing.xxl,
     paddingBottom: spacing.md,
+  },
+  headerAction: {
+    paddingTop: spacing.xs,
   },
   title: {
     ...typography.display,

@@ -39,7 +39,7 @@ export default function SettingsScreen() {
   const router = useRouter();
   const { folders, excludedTracks, clearCache } = useLibrary();
   const { signOut } = useAuth();
-  const { status, lastSyncedAt, syncNow } = useSync();
+  const { status, lastSyncedAt, lastSync, syncNow } = useSync();
 
   // Taille du cache pochettes lue une fois au montage (initialiseur paresseux, pas de re-scan).
   const [cacheSize, setCacheSize] = useState(() => coverCacheSize());
@@ -91,14 +91,17 @@ export default function SettingsScreen() {
     return excludedTotal > 0 ? `${base} · ${excludedTotal} exclus` : base;
   }, [folders, excludedTracks.length]);
 
+  const offline = lastSync?.result === 'offline';
   const syncHint =
     status === 'syncing'
       ? 'Synchronisation…'
       : status === 'error'
         ? 'Échec — appuie pour réessayer'
-        : lastSyncedAt !== null
-          ? formatSyncedAt(lastSyncedAt)
-          : 'Appuie pour synchroniser';
+        : offline
+          ? `Hors-ligne — synchro en attente${lastSyncedAt !== null ? ` · ${formatSyncedAt(lastSyncedAt)}` : ''}`
+          : lastSyncedAt !== null
+            ? formatSyncedAt(lastSyncedAt)
+            : 'Appuie pour synchroniser';
 
   const rows: Row[] = [
     {
@@ -145,7 +148,18 @@ export default function SettingsScreen() {
 
         <View style={styles.list}>
           <Pressable
-            onPress={() => void syncNow()}
+            onPress={() => {
+              // Feedback uniquement sur la synchro *manuelle* (les autos restent silencieuses).
+              void syncNow().then((result) => {
+                if (result === 'ok') {
+                  showToast('Playlists synchronisées', 'cloud_done');
+                } else if (result === 'offline') {
+                  showToast('Hors-ligne — synchro dès que le réseau revient', 'cloud_off');
+                } else if (result === 'error') {
+                  showToast('Échec de la synchronisation', 'cloud_off');
+                }
+              });
+            }}
             disabled={status === 'syncing'}
             style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
             accessibilityRole="button"
@@ -153,7 +167,7 @@ export default function SettingsScreen() {
             accessibilityState={{ disabled: status === 'syncing', busy: status === 'syncing' }}
           >
             <Icon
-              name={status === 'error' ? 'cloud_off' : 'cloud_done'}
+              name={status === 'error' || offline ? 'cloud_off' : 'cloud_done'}
               size={24}
               color={status === 'error' ? colors.accent : colors.accentIcon}
             />

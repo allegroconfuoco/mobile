@@ -36,6 +36,12 @@ export type SyncContextValue = {
   status: SyncStatus;
   /** Horodatage (ms) du dernier sync réussi, ou `null`. */
   lastSyncedAt: number | null;
+  /**
+   * Issue de la dernière **tentative** de synchro (réussie ou non), ou `null` si aucune.
+   * Sert d'indicateur hors-ligne (lot 6 de l'audit) sans dépendance netinfo : `offline` = la
+   * dernière tentative a échoué faute de réseau (`ApiError.status === 0` dans l'engine).
+   */
+  lastSync: { at: number; result: SyncResult } | null;
   /** Déclenche une synchro (idempotent si une est déjà en vol). */
   syncNow: () => Promise<SyncResult>;
 };
@@ -51,6 +57,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
 
   const [status, setStatus] = useState<SyncStatus>('idle');
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
+  const [lastSync, setLastSync] = useState<{ at: number; result: SyncResult } | null>(null);
 
   // Synchro en vol, pour sérialiser (mêmes déclencheurs peuvent se chevaucher).
   const inFlightRef = useRef<Promise<SyncResult> | null>(null);
@@ -82,9 +89,14 @@ export function SyncProvider({ children }: { children: ReactNode }) {
           setLastSyncedAt(Date.now());
         }
         setStatus(result === 'error' ? 'error' : 'idle');
+        // `skipped` (non connecté) n'est pas une tentative : on ne l'enregistre pas.
+        if (result !== 'skipped') {
+          setLastSync({ at: Date.now(), result });
+        }
         return result;
       } catch {
         setStatus('error');
+        setLastSync({ at: Date.now(), result: 'error' });
         return 'error';
       } finally {
         inFlightRef.current = null;
@@ -125,7 +137,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   }, [revision, isAuthenticated, syncNow]);
 
   return (
-    <SyncContext.Provider value={{ status, lastSyncedAt, syncNow }}>
+    <SyncContext.Provider value={{ status, lastSyncedAt, lastSync, syncNow }}>
       {children}
     </SyncContext.Provider>
   );
