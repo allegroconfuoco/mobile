@@ -70,6 +70,7 @@ export type IconName =
   | 'save'
   | 'settings_backup_restore'
   | 'delete_sweep'
+  | 'timer'
   | 'logout';
 
 type IconProps = {

@@ -77,6 +77,8 @@ export type QueueActions = {
   moveInQueue: (fromIndex: number, toIndex: number) => Promise<void>;
   /** Saute à la piste `index` de la file et lance la lecture. */
   skipToIndex: (index: number) => Promise<void>;
+  /** Vide la file en conservant la piste en cours (ou tout, si rien ne joue). */
+  clearQueue: () => Promise<void>;
 };
 
 /** Instantané réactif de la file, pour l'affichage. */
@@ -388,6 +390,34 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     [enqueue, refreshQueue]
   );
 
+  const clearQueue = useCallback(
+    () =>
+      enqueue(async () => {
+        if (!(await ensurePlayerReady())) {
+          return;
+        }
+        const [tracks, activeIndex] = await Promise.all([
+          TrackPlayer.getQueue(),
+          TrackPlayer.getActiveTrackIndex(),
+        ]);
+        if (tracks.length === 0) {
+          return;
+        }
+        if (activeIndex == null) {
+          // Rien en lecture : on remet le lecteur à zéro.
+          await TrackPlayer.reset();
+        } else {
+          // On retire tout sauf la piste en cours (passées ET à venir), en un seul appel natif.
+          const others = tracks.map((_t, i) => i).filter((i) => i !== activeIndex);
+          if (others.length > 0) {
+            await TrackPlayer.remove(others);
+          }
+        }
+        await refreshQueue();
+      }),
+    [enqueue, refreshQueue]
+  );
+
   const actions = useMemo<PlayerActions & QueueActions>(
     () => ({
       playQueue,
@@ -400,6 +430,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       removeFromQueue,
       moveInQueue,
       skipToIndex,
+      clearQueue,
     }),
     [
       playQueue,
@@ -412,6 +443,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       removeFromQueue,
       moveInQueue,
       skipToIndex,
+      clearQueue,
     ]
   );
 

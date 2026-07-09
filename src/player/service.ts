@@ -2,6 +2,7 @@ import TrackPlayer, { Event, State } from 'react-native-track-player';
 
 import { smartPrevious } from './controls';
 import { notifyPlaybackError } from './playbackErrors';
+import { checkSleepTimer, sleepTimerOnTrackChanged } from './sleepTimer';
 
 /**
  * Service de lecture (headless) de react-native-track-player.
@@ -35,6 +36,14 @@ export async function PlaybackService(): Promise<void> {
       consecutiveErrors = 0;
     }
   });
+
+  // Minuteur de sommeil : vérifié ici (le service vit en arrière-plan, un setTimeout long serait
+  // throttlé). Le tick de progression est déjà émis toutes les secondes (`setup.ts`).
+  TrackPlayer.addEventListener(Event.PlaybackProgressUpdated, () => void checkSleepTimer());
+  TrackPlayer.addEventListener(
+    Event.PlaybackActiveTrackChanged,
+    () => void sleepTimerOnTrackChanged()
+  );
 
   TrackPlayer.addEventListener(Event.PlaybackError, (e) => {
     console.warn('[player] erreur de lecture', e);

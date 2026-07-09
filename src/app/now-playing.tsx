@@ -18,15 +18,36 @@ import { colors, coverFallback, coverGradient, radii, spacing, typography } from
 import { Icon } from '@/components/Icon';
 import { ToastHost, showToast } from '@/components/Toast';
 import { PressableScale } from '@/components/PressableScale';
+import { BottomSheet } from '@/components/BottomSheet';
 import { TrackActionsSheet } from '@/components/TrackActionsSheet';
 import { PlaylistPickerSheet } from '@/components/PlaylistPickerSheet';
-import { usePlayer, usePlaybackMode } from '@/player/PlayerProvider';
+import { usePlayer, usePlaybackMode, useQueue } from '@/player/PlayerProvider';
 import { usePlayback } from '@/player/usePlayback';
+import {
+  clearSleepTimer,
+  getSleepTimer,
+  sleepAtEndOfTrack,
+  startSleepTimer,
+  subscribeSleepTimer,
+  type SleepTimerState,
+} from '@/player/sleepTimer';
 import { useLibrary } from '@/library/LibraryProvider';
 import { useFavorites } from '@/library/FavoritesProvider';
 import { confirmRestoreTags } from '@/library/writeTags';
 import * as db from '@/library/db';
 import { tapLight, tapMedium } from '@/lib/haptics';
+
+/** Libellé court du minuteur (compte à rebours ou fin de piste), ou `null` si inactif. */
+function sleepTimerLabel(timer: SleepTimerState): string | null {
+  if (timer.mode === 'deadline') {
+    const minutes = Math.max(1, Math.ceil((timer.endAt - Date.now()) / 60_000));
+    return `${minutes} min`;
+  }
+  if (timer.mode === 'end-of-track') {
+    return 'fin de piste';
+  }
+  return null;
+}
 
 /** Formate une durée (secondes) en `m:ss`. */
 function formatTime(seconds: number): string {
@@ -46,8 +67,26 @@ export default function NowPlayingScreen() {
   const { track, isPlaying, position, duration } = usePlayback();
   const { togglePlayPause, skipToNext, skipToPrevious, seekTo, playNext, addToQueue } = usePlayer();
   const { repeatMode, shuffle, cycleRepeat, toggleShuffle } = usePlaybackMode();
+  const { tracks: queueTracks, activeIndex } = useQueue();
   const { tracksById, setTrackExcluded, reloadTracks } = useLibrary();
   const { isFavorite, toggleFavorite } = useFavorites();
+
+  // Minuteur de sommeil : état du store partagé avec le service (cf. sleepTimer.ts). Le compte à
+  // rebours affiché se rafraîchit « gratuitement » via les re-rendus de progression (250 ms).
+  const [sleepTimer, setSleepTimer] = useState<SleepTimerState>(getSleepTimer);
+  useEffect(() => subscribeSleepTimer(setSleepTimer), []);
+  const [timerSheetOpen, setTimerSheetOpen] = useState(false);
+
+  // « À suivre » : piste suivante de la file (boucle sur la première en répétition de file).
+  const upNext = useMemo(() => {
+    if (activeIndex === undefined || queueTracks.length === 0) {
+      return null;
+    }
+    if (activeIndex + 1 < queueTracks.length) {
+      return queueTracks[activeIndex + 1];
+    }
+    return repeatMode === RepeatMode.Queue && queueTracks.length > 1 ? queueTracks[0] : null;
+  }, [queueTracks, activeIndex, repeatMode]);
 
   // Piste locale correspondant à la lecture en cours (pour favori + menu d'actions).
   const local = track ? (tracksById.get(String(track.id)) ?? null) : null;
@@ -81,44 +120,68 @@ export default function NowPlayingScreen() {
     }).start();
   }, [enter]);
 
-  // Glissement vers le bas pour fermer (comme un vrai lecteur musical). La pochette sert de
-  // poignée de glissement (grande zone non interactive) ; `PanResponder` du cœur RN, cf. CLAUDE.md.
+  // Gestes sur la pochette (grande zone non interactive, `PanResponder` du cœur RN, cf. CLAUDE.md) :
+  // glissement **vertical vers le bas** = fermer (comme un vrai lecteur), glissement **horizontal**
+  // = piste précédente/suivante (mêmes seuils que le mini-player, pour la cohérence). L'axe est
+  // départagé par le mouvement dominant ; le retour visuel suit le doigt (amorti en horizontal).
   const [dragY] = useState(() => new Animated.Value(0));
-  const dismissResponder = useMemo(
-    () =>
-      PanResponder.create({
-        // On ne prend le geste que pour un glissement franchement vertical vers le bas,
-        // pour ne pas gêner un tap sur la pochette.
-        onMoveShouldSetPanResponder: (_e, g) => g.dy > 8 && g.dy > Math.abs(g.dx),
-        onPanResponderMove: (_e, g) => {
-          if (g.dy > 0) {
-            dragY.setValue(g.dy);
-          }
-        },
-        onPanResponderRelease: (_e, g) => {
-          // Assez loin OU geste rapide vers le bas → on ferme ; sinon retour en place.
-          if (g.dy > 120 || g.vy > 0.6) {
-            router.back();
-          } else {
-            Animated.spring(dragY, {
-              toValue: 0,
-              useNativeDriver: true,
-              speed: 18,
-              bounciness: 6,
-            }).start();
-          }
-        },
-        onPanResponderTerminate: () => {
-          Animated.spring(dragY, {
-            toValue: 0,
-            useNativeDriver: true,
-            speed: 18,
-            bounciness: 6,
-          }).start();
-        },
-      }),
-    [dragY, router]
-  );
+  const [swipeX] = useState(() => new Animated.Value(0));
+  // Actions lues via ref dans les handlers (closures fraîches sans recréer le responder).
+  const skipRef = useRef({ skipToNext, skipToPrevious });
+  useEffect(() => {
+    skipRef.current = { skipToNext, skipToPrevious };
+  });
+
+  // `skipRef` n'est lue que dans les handlers de geste : faux positif react-hooks/refs (cf. MiniPlayer).
+  /* eslint-disable react-hooks/refs */
+  const coverResponder = useMemo(() => {
+    const settle = () => {
+      Animated.spring(dragY, {
+        toValue: 0,
+        useNativeDriver: true,
+        speed: 18,
+        bounciness: 6,
+      }).start();
+      Animated.spring(swipeX, {
+        toValue: 0,
+        useNativeDriver: true,
+        speed: 20,
+        bounciness: 8,
+      }).start();
+    };
+    return PanResponder.create({
+      // On ne prend le geste qu'au-delà d'un petit seuil : vertical vers le bas OU horizontal franc.
+      onMoveShouldSetPanResponder: (_e, g) =>
+        (g.dy > 8 && g.dy > Math.abs(g.dx)) ||
+        (Math.abs(g.dx) > 8 && Math.abs(g.dx) > Math.abs(g.dy)),
+      onPanResponderMove: (_e, g) => {
+        if (Math.abs(g.dx) > Math.abs(g.dy)) {
+          swipeX.setValue(g.dx * 0.4);
+          dragY.setValue(0);
+        } else if (g.dy > 0) {
+          dragY.setValue(g.dy);
+          swipeX.setValue(0);
+        }
+      },
+      onPanResponderRelease: (_e, g) => {
+        const horizontal = Math.abs(g.dx) > Math.abs(g.dy);
+        if (horizontal && g.dx <= -60) {
+          tapLight();
+          skipRef.current.skipToNext();
+        } else if (horizontal && g.dx >= 60) {
+          tapLight();
+          skipRef.current.skipToPrevious();
+        } else if (!horizontal && (g.dy > 120 || g.vy > 0.6)) {
+          // Assez loin OU geste rapide vers le bas → on ferme.
+          router.back();
+          return;
+        }
+        settle();
+      },
+      onPanResponderTerminate: settle,
+    });
+  }, [dragY, swipeX, router]);
+  /* eslint-enable react-hooks/refs */
 
   // La pochette « respire » : légèrement agrandie en lecture, resserrée en pause (repère d'état).
   const [coverScale] = useState(() => new Animated.Value(1));
@@ -242,9 +305,14 @@ export default function NowPlayingScreen() {
         </Pressable>
       </View>
 
-      {/* Pochette (sert aussi de poignée : glisser vers le bas ferme la lecture) */}
-      <View style={styles.coverWrap} {...dismissResponder.panHandlers}>
-        <Animated.View style={[styles.coverShadow, { transform: [{ scale: coverScale }] }]}>
+      {/* Pochette (poignée de gestes : bas = fermer, horizontal = changer de piste) */}
+      <View style={styles.coverWrap} {...coverResponder.panHandlers}>
+        <Animated.View
+          style={[
+            styles.coverShadow,
+            { transform: [{ scale: coverScale }, { translateX: swipeX }] },
+          ]}
+        >
           {artwork ? (
             <Image source={{ uri: artwork }} style={styles.cover} contentFit="cover" />
           ) : (
@@ -378,8 +446,49 @@ export default function NowPlayingScreen() {
         </Pressable>
       </View>
 
-      {/* Actions secondaires : la file d'attente. */}
+      {/* Actions secondaires : minuteur de sommeil · « À suivre » · file d'attente. */}
       <View style={styles.secondary}>
+        <Pressable
+          onPress={() => {
+            tapLight();
+            setTimerSheetOpen(true);
+          }}
+          hitSlop={12}
+          style={styles.timerButton}
+          accessibilityRole="button"
+          accessibilityLabel={
+            sleepTimer.mode === 'off'
+              ? 'Minuteur de sommeil'
+              : `Minuteur de sommeil actif, ${sleepTimerLabel(sleepTimer)}`
+          }
+        >
+          <Icon
+            name="timer"
+            size={22}
+            color={sleepTimer.mode === 'off' ? colors.textSecondary : colors.accent}
+          />
+          {sleepTimer.mode !== 'off' && (
+            <Text style={styles.timerLabel}>{sleepTimerLabel(sleepTimer)}</Text>
+          )}
+        </Pressable>
+
+        {upNext ? (
+          <Pressable
+            onPress={() => router.push('/queue')}
+            style={styles.upNext}
+            accessibilityRole="button"
+            accessibilityLabel={`À suivre : ${upNext.title ?? 'Titre inconnu'}. Ouvrir la file.`}
+          >
+            <Text style={styles.upNextLabel}>À suivre</Text>
+            <Text style={styles.upNextTitle} numberOfLines={1}>
+              {upNext.title ?? 'Titre inconnu'}
+              {upNext.artist ? ` · ${upNext.artist}` : ''}
+            </Text>
+          </Pressable>
+        ) : (
+          <View style={styles.upNext} />
+        )}
+
         <Pressable
           onPress={() => router.push('/queue')}
           hitSlop={12}
@@ -389,6 +498,58 @@ export default function NowPlayingScreen() {
           <Icon name="queue_music" size={22} color={colors.textSecondary} />
         </Pressable>
       </View>
+
+      {/* Feuille du minuteur de sommeil. */}
+      <BottomSheet visible={timerSheetOpen} onClose={() => setTimerSheetOpen(false)}>
+        <Text style={styles.sheetHeader}>Minuteur de sommeil</Text>
+        {[15, 30, 45, 60].map((minutes) => (
+          <Pressable
+            key={minutes}
+            onPress={() => {
+              tapLight();
+              startSleepTimer(minutes);
+              setTimerSheetOpen(false);
+              showToast(`Lecture coupée dans ${minutes} min`, 'timer');
+            }}
+            style={({ pressed }) => [styles.sheetRow, pressed && styles.sheetRowPressed]}
+            accessibilityRole="button"
+            accessibilityLabel={`Arrêter la lecture dans ${minutes} minutes`}
+          >
+            <Icon name="timer" size={22} color={colors.textSecondary} />
+            <Text style={styles.sheetRowLabel}>Dans {minutes} minutes</Text>
+          </Pressable>
+        ))}
+        <Pressable
+          onPress={() => {
+            tapLight();
+            sleepAtEndOfTrack();
+            setTimerSheetOpen(false);
+            showToast('Lecture coupée à la fin de la piste', 'timer');
+          }}
+          style={({ pressed }) => [styles.sheetRow, pressed && styles.sheetRowPressed]}
+          accessibilityRole="button"
+          accessibilityLabel="Arrêter la lecture à la fin de la piste"
+        >
+          <Icon name="music_off" size={22} color={colors.textSecondary} />
+          <Text style={styles.sheetRowLabel}>À la fin de la piste</Text>
+        </Pressable>
+        {sleepTimer.mode !== 'off' && (
+          <Pressable
+            onPress={() => {
+              tapLight();
+              clearSleepTimer();
+              setTimerSheetOpen(false);
+              showToast('Minuteur désactivé', 'timer');
+            }}
+            style={({ pressed }) => [styles.sheetRow, pressed && styles.sheetRowPressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Désactiver le minuteur"
+          >
+            <Icon name="close" size={22} color={colors.accent} />
+            <Text style={[styles.sheetRowLabel, { color: colors.accent }]}>Désactiver</Text>
+          </Pressable>
+        )}
+      </BottomSheet>
 
       {/* Menu d'actions sur la piste en cours (réutilisé de la bibliothèque). */}
       <TrackActionsSheet
@@ -550,9 +711,59 @@ const styles = StyleSheet.create({
   },
   secondary: {
     flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 46,
+    alignItems: 'center',
+    gap: spacing.xl,
+    paddingHorizontal: spacing.xxl,
     paddingTop: spacing.xxl,
     paddingBottom: spacing.md,
+  },
+  timerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  timerLabel: {
+    ...typography.body,
+    fontSize: 11,
+    color: colors.accent,
+    fontVariant: ['tabular-nums'],
+  },
+  upNext: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: 'center',
+  },
+  upNextLabel: {
+    ...typography.label,
+    fontSize: 9.5,
+    letterSpacing: 1.4,
+    color: colors.textMuted,
+  },
+  upNextTitle: {
+    ...typography.body,
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  sheetHeader: {
+    ...typography.label,
+    color: colors.textMuted,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
+  },
+  sheetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderRadius: radii.sm,
+  },
+  sheetRowPressed: {
+    backgroundColor: colors.background,
+  },
+  sheetRowLabel: {
+    ...typography.heading,
+    fontSize: 15,
   },
 });

@@ -1,15 +1,16 @@
 import { useRouter } from 'expo-router';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useMemo } from 'react';
 
 import { colors, spacing, typography } from '@/theme';
 import { Icon } from '@/components/Icon';
-import { ToastHost } from '@/components/Toast';
+import { ToastHost, showToast } from '@/components/Toast';
 import { DraggableTrackList, type DraggableTrackItem } from '@/components/DraggableTrackList';
 import { usePlayer, useQueue } from '@/player/PlayerProvider';
 import { usePlayback } from '@/player/usePlayback';
+import { tapMedium } from '@/lib/haptics';
 
 /**
  * Écran File d'attente, présenté en modal.
@@ -23,7 +24,22 @@ export default function QueueScreen() {
   const insets = useSafeAreaInsets();
   const { tracks } = useQueue();
   const { track: activeTrack } = usePlayback();
-  const { skipToIndex, moveInQueue, removeFromQueue } = usePlayer();
+  const { skipToIndex, moveInQueue, removeFromQueue, clearQueue } = usePlayer();
+
+  const confirmClear = () => {
+    Alert.alert('Vider la file', 'La piste en cours de lecture est conservée.', [
+      { text: 'Annuler', style: 'cancel' },
+      {
+        text: 'Vider',
+        style: 'destructive',
+        onPress: () => {
+          tapMedium();
+          void clearQueue();
+          showToast('File vidée', 'delete_sweep');
+        },
+      },
+    ]);
+  };
 
   const count = tracks.length;
   const subtitle = count === 0 ? 'File vide' : `${count} ${count > 1 ? 'titres' : 'titre'} en file`;
@@ -56,8 +72,19 @@ export default function QueueScreen() {
           <Text style={styles.title}>File d&apos;attente</Text>
           <Text style={styles.subtitle}>{subtitle}</Text>
         </View>
-        {/* Espace symétrique au chevron pour centrer le titre. */}
-        <View style={styles.topSpacer} />
+        {count > 1 ? (
+          <Pressable
+            onPress={confirmClear}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Vider la file d'attente"
+          >
+            <Icon name="delete_sweep" size={24} color={colors.textSecondary} />
+          </Pressable>
+        ) : (
+          /* Espace symétrique au chevron pour centrer le titre. */
+          <View style={styles.topSpacer} />
+        )}
       </View>
 
       {count === 0 ? (
