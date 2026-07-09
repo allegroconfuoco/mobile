@@ -33,6 +33,12 @@ const TOOLS: Tool[] = [
     hint: 'Retirer des titres de leur album (vide le tag)',
     href: '/bulk-dissociate-albums',
   },
+  {
+    icon: 'auto_fix_high',
+    label: 'Nettoyer les titres',
+    hint: 'Retirer parenthèses, n° de piste, préfixe artiste… (motifs personnalisables)',
+    href: '/title-cleanup',
+  },
 ];
 
 export default function FileEditingScreen() {
