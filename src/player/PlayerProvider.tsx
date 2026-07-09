@@ -15,6 +15,8 @@ import * as db from '@/library/db';
 import { ensurePlayerReady } from './setup';
 import { resolvePlayerTracks } from './track';
 import { planMoves, restoreOrder, shuffleAfter } from './shuffle';
+import { smartPrevious } from './controls';
+import { requestNotificationPermission } from './notifPermission';
 
 /** Correspondance `RepeatMode` ↔ valeur persistée (`app_settings`). */
 function repeatFromSetting(value: string | null): RepeatMode {
@@ -169,7 +171,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const sub = TrackPlayer.addEventListener(Event.PlaybackActiveTrackChanged, () => {
       void enqueue(refreshQueue);
     });
-    return () => sub.remove();
+    // Fin de file (hors répétition) : resynchronise le snapshot pour que mini-player et écran
+    // Lecture reflètent l'état arrêté au lieu de rester figés sur la dernière piste « en cours ».
+    const endSub = TrackPlayer.addEventListener(Event.PlaybackQueueEnded, () => {
+      void enqueue(refreshQueue);
+    });
+    return () => {
+      sub.remove();
+      endSub.remove();
+    };
   }, [enqueue, refreshQueue]);
 
   // Applique le mode de répétition persisté une fois le lecteur prêt (le défaut RNTP est `Off`).
@@ -196,6 +206,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         if (!(await ensurePlayerReady()) || tracks.length === 0) {
           return;
         }
+        // Android 13+ : sans elle, la notification média est masquée. Non bloquant (la lecture
+        // démarre pendant que le dialogue système s'affiche), demandé au premier vrai besoin.
+        requestNotificationPermission();
         const targetId = tracks[startIndex]?.id;
         const resolved = await resolvePlayerTracks(tracks);
         if (resolved.length === 0) {
@@ -242,7 +255,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const skipToNext = useCallback(() => void TrackPlayer.skipToNext().catch(() => {}), []);
-  const skipToPrevious = useCallback(() => void TrackPlayer.skipToPrevious().catch(() => {}), []);
+  // « Précédent » intelligent : > 3 s de lecture = redémarrer la piste, sinon reculer.
+  const skipToPrevious = useCallback(() => void smartPrevious().catch(() => {}), []);
   const seekTo = useCallback((seconds: number) => void TrackPlayer.seekTo(seconds), []);
 
   const cycleRepeat = useCallback(() => {

@@ -55,6 +55,7 @@ const TrackPlayer = {
   getQueue: async () => [],
   getActiveTrackIndex: async () => undefined,
   getPlaybackState: async () => ({ state: State.None }),
+  getProgress: async () => ({ position: 0, duration: 0, buffered: 0 }),
 };
 
 export default TrackPlayer;
