@@ -19,6 +19,8 @@
  * autre chose (clé de rapprochement inter-appareils, `computeMatchKey` dans `db.ts`).
  */
 
+import { normalizeForSearch } from './grouping';
+
 /** Termes de recherche prêts à être envoyés au proxy MusicBrainz. */
 export type MatchQuery = {
   /** Artiste nettoyé, ou `null` si introuvable (tags absents et nom de fichier sans motif). */
@@ -56,6 +58,9 @@ const NOISE_WORDS =
 
 /** Segment entre parenthèses/crochets/accolades, sans imbrication. */
 const BRACKET_SEGMENT = /\s*[([{]([^()[\]{}]*)[)\]}]/g;
+
+/** Tout segment parenthésé/crocheté/accoladé (contenu quelconque), pour le nettoyage agressif. */
+const ALL_BRACKETS = /\s*[([{][^()[\]{}]*[)\]}]/g;
 
 /**
  * Segment entre parenthèses ne contenant qu'une année (« (2019) », « [2024] », « (© 1998) ») :
@@ -216,4 +221,43 @@ export function buildMatchQuery(track: MatchQueryInput): MatchQuery | null {
       : 'tags'
     : 'filename';
   return { artist, title, source };
+}
+
+/**
+ * Nettoyage **agressif** d'un titre pour la recherche, à utiliser quand l'artiste est connu (bac
+ * « Album inconnu »). Contrairement à `buildMatchQuery` — conservateur : il garde « (Acoustic) » et
+ * ne retire l'artiste que s'il est *exactement* le préfixe avant le premier ` - ` — ici on retire :
+ *  - **toutes** les parenthèses/crochets/accolades (année, « clip officiel », « prod. X »…) ;
+ *  - le préfixe site de téléchargement et le numéro de piste ;
+ *  - les mentions feat./remaster en suffixe ;
+ *  - le nom de l'artiste connu partout où il apparaît comme **segment** ` - ` (insensible à la
+ *    casse et aux accents), le titre restant gardant ses accents.
+ *
+ * À réserver aux fichiers douteux : on peut y perdre un « (Live) » légitime — acceptable pour
+ * dégrossir un bac inconnu, pas pour l'enrichissement général (d'où une fonction séparée).
+ */
+export function cleanTitleForSearch(raw: string, knownArtist?: string | null): string {
+  let out = raw.replace(AUDIO_EXTENSION, '');
+  out = out.replace(/_/g, ' ');
+  out = out.replace(SITE_PREFIX, '');
+  out = out.replace(ALL_BRACKETS, ' ');
+  out = out.replace(TRACK_NO_PREFIX, '');
+  out = out.replace(FEAT_SUFFIX, '');
+  out = out.replace(REMASTER_SUFFIX, '');
+
+  // « Artiste - Titre » / « N - Artiste - Titre » → on retire les segments qui SONT l'artiste connu
+  // (comparaison normalisée), et on garde le dernier segment restant comme titre.
+  let parts = out
+    .split(ARTIST_TITLE_SEPARATOR)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+  const na = knownArtist ? normalizeForSearch(knownArtist) : '';
+  if (na) {
+    const kept = parts.filter((p) => normalizeForSearch(p) !== na);
+    if (kept.length > 0) {
+      parts = kept;
+    }
+  }
+  out = parts.length > 0 ? parts[parts.length - 1] : out;
+  return collapse(out);
 }

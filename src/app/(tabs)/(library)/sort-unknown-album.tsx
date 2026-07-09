@@ -11,7 +11,7 @@ import { useLibrary } from '@/library/LibraryProvider';
 import type { LocalTrack } from '@/library/useAudioLibrary';
 import * as db from '@/library/db';
 import { ApiError } from '@/api/auth';
-import { buildMatchQuery } from '@/library/matchQuery';
+import { buildMatchQuery, cleanTitleForSearch } from '@/library/matchQuery';
 import { resolveMetadata, type ResolvedMetadata } from '@/library/musicbrainzApi';
 import { makeAlbumKey, tracksForAlbum, UNKNOWN_ALBUM, UNKNOWN_ARTIST } from '@/library/grouping';
 
@@ -97,13 +97,18 @@ export default function SortUnknownAlbumScreen() {
           if (cancelled.current) {
             return;
           }
-          const query = buildMatchQuery({
-            title: track.title,
-            artist: track.artist,
-            filename: track.filename,
-          });
-          const searchArtist = knownArtist ?? query?.artist ?? null;
-          const title = query?.title ?? null;
+          // Artiste connu (clé du bac) → nettoyage agressif du titre (toutes parenthèses/crochets,
+          // n° de piste, nom d'artiste retirés). Sans artiste connu (défensif), on retombe sur le
+          // parser conservateur pour au moins déduire un artiste.
+          const searchArtist =
+            knownArtist ??
+            buildMatchQuery({
+              title: track.title,
+              artist: track.artist,
+              filename: track.filename,
+            })?.artist ??
+            null;
+          const title = cleanTitleForSearch(track.title || track.filename, knownArtist);
           if (!searchArtist || !title) {
             setRow(track.id, { status: 'nomatch', match: null, selected: false });
             continue;
@@ -223,7 +228,15 @@ export default function SortUnknownAlbumScreen() {
               }
             }}
             onCorrect={() =>
-              router.push({ pathname: '/metadata-fix', params: { trackId: item.id } })
+              router.push({
+                pathname: '/metadata-fix',
+                params: {
+                  trackId: item.id,
+                  // Prérempli avec la MÊME requête nettoyée que la recherche auto (cohérence).
+                  artist: knownArtist ?? '',
+                  title: cleanTitleForSearch(item.title || item.filename, knownArtist),
+                },
+              })
             }
           />
         )}

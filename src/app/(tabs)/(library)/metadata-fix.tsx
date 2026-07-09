@@ -36,7 +36,11 @@ import { buildMatchQuery } from '@/library/matchQuery';
 export default function MetadataFixScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { trackId } = useLocalSearchParams<{ trackId: string }>();
+  const {
+    trackId,
+    artist: artistParam,
+    title: titleParam,
+  } = useLocalSearchParams<{ trackId: string; artist?: string; title?: string }>();
   const { tracksById, reloadTracks } = useLibrary();
   const { getAccessToken } = useAuth();
 
@@ -48,15 +52,18 @@ export default function MetadataFixScreen() {
   );
   const hasProposal = enrichment?.mbid != null;
 
-  // Préremplissage des champs de recherche via le **même** parser que l'auto-match (`buildMatchQuery`,
-  // #18) : on retire le bruit (préfixe artiste, `(Official Video)`, `[2019]`, feat., remaster, n° de
-  // piste…) au lieu de recopier le tag/nom de fichier brut. Sinon la recherche manuelle repartait
-  // avec un titre pollué et ne trouvait rien — l'incohérence remontée avec le rangement d'album.
+  // Préremplissage des champs de recherche. Priorité aux params `artist`/`title` fournis par
+  // l'appelant (ex. le rangement d'« Album inconnu » passe une requête déjà nettoyée agressivement) ;
+  // sinon on nettoie via le **même** parser que l'auto-match (`buildMatchQuery`, #18) plutôt que de
+  // recopier le tag/nom de fichier brut (préfixe artiste, `(Official Video)`, `[2019]`, feat.,
+  // remaster, n° de piste…) — sinon la recherche repart avec un titre pollué et ne trouve rien.
   const cleaned = track
     ? buildMatchQuery({ title: track.title, artist: track.artist, filename: track.filename })
     : null;
-  const [artistInput, setArtistInput] = useState(cleaned?.artist ?? track?.artist ?? '');
-  const [titleInput, setTitleInput] = useState(cleaned?.title ?? track?.title ?? '');
+  const [artistInput, setArtistInput] = useState(
+    artistParam || cleaned?.artist || track?.artist || ''
+  );
+  const [titleInput, setTitleInput] = useState(titleParam || cleaned?.title || track?.title || '');
   // On révèle la recherche d'emblée quand il n'y a pas de match à valider.
   const [showSearch, setShowSearch] = useState(!hasProposal);
   const [results, setResults] = useState<ResolvedMetadata[] | null>(null);
