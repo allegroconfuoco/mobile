@@ -4,6 +4,8 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { colors, radii, spacing, typography } from '@/theme';
 import { Icon } from '@/components/Icon';
 import { BottomSheet } from '@/components/BottomSheet';
+import { showToast } from '@/components/Toast';
+import { tapLight } from '@/lib/haptics';
 import { PlaylistNameDialog } from '@/components/PlaylistNameDialog';
 import { usePlaylistsContext } from '@/library/PlaylistsProvider';
 import type { LocalTrack } from '@/library/useAudioLibrary';
@@ -27,9 +29,11 @@ export function PlaylistPickerSheet({ track, onClose }: PlaylistPickerSheetProps
 
   const visible = track !== null;
 
-  const addTo = (playlistId: string) => {
+  const addTo = (playlistId: string, playlistName: string) => {
     if (track) {
       addTracksToPlaylist(playlistId, [track.id]);
+      tapLight();
+      showToast(`Ajouté à « ${playlistName} »`, 'playlist_add_check');
     }
     onClose();
   };
@@ -37,7 +41,7 @@ export function PlaylistPickerSheet({ track, onClose }: PlaylistPickerSheetProps
   const createAndAdd = (name: string) => {
     const id = createPlaylist(name);
     // La piste est capturée avant fermeture : `addTo` referme aussi la feuille.
-    addTo(id);
+    addTo(id, name);
   };
 
   return (
@@ -61,7 +65,7 @@ export function PlaylistPickerSheet({ track, onClose }: PlaylistPickerSheetProps
           {playlists.map((p) => (
             <Pressable
               key={p.id}
-              onPress={() => addTo(p.id)}
+              onPress={() => addTo(p.id, p.name)}
               style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
               accessibilityRole="button"
               accessibilityLabel={`Ajouter à ${p.name}`}

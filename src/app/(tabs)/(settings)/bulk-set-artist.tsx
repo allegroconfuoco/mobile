@@ -29,6 +29,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BackButton } from '@/components/BackButton';
 import { Icon } from '@/components/Icon';
+import { showToast } from '@/components/Toast';
 import { SearchBar } from '@/components/SearchBar';
 import { TrackCover } from '@/components/TrackCover';
 import { useLibrary } from '@/library/LibraryProvider';
@@ -126,9 +127,9 @@ export default function BulkSetArtistScreen() {
     }
     if (outcome.failed === 0 && outcome.written > 0) {
       setSelected(new Set());
-      Alert.alert(
-        'Artiste associé',
-        `« ${name} » a été écrit dans ${outcome.written} titre${outcome.written > 1 ? 's' : ''}.`
+      showToast(
+        `« ${name} » écrit dans ${outcome.written} titre${outcome.written > 1 ? 's' : ''}`,
+        'person_add'
       );
       router.back();
     } else if (outcome.written === 0) {

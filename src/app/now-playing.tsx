@@ -16,6 +16,7 @@ import { RepeatMode } from 'react-native-track-player';
 
 import { colors, coverFallback, coverGradient, radii, spacing, typography } from '@/theme';
 import { Icon } from '@/components/Icon';
+import { ToastHost, showToast } from '@/components/Toast';
 import { PressableScale } from '@/components/PressableScale';
 import { TrackActionsSheet } from '@/components/TrackActionsSheet';
 import { PlaylistPickerSheet } from '@/components/PlaylistPickerSheet';
@@ -394,8 +395,18 @@ export default function NowPlayingScreen() {
         title={menuOpen ? (local?.title ?? title) : null}
         isFavorite={liked}
         onClose={() => setMenuOpen(false)}
-        onPlayNext={() => local && void playNext([local])}
-        onAddToQueue={() => local && void addToQueue([local])}
+        onPlayNext={() => {
+          if (local) {
+            void playNext([local]);
+            showToast('Lira ensuite', 'queue_music');
+          }
+        }}
+        onAddToQueue={() => {
+          if (local) {
+            void addToQueue([local]);
+            showToast('Ajouté à la file', 'queue_music');
+          }
+        }}
         onToggleFavorite={onToggleFavorite}
         onAddToPlaylist={() => setPickerOpen(true)}
         onFixMetadata={() =>
@@ -413,6 +424,9 @@ export default function NowPlayingScreen() {
       />
 
       <PlaylistPickerSheet track={pickerOpen ? local : null} onClose={() => setPickerOpen(false)} />
+
+      {/* Modal natif : le host racine ne passe pas au-dessus, on monte le nôtre (cf. Toast.tsx). */}
+      <ToastHost variant="modal" />
     </Animated.View>
   );
 }

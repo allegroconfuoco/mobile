@@ -25,6 +25,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BackButton } from '@/components/BackButton';
 import { Icon } from '@/components/Icon';
+import { showToast } from '@/components/Toast';
+import { tapMedium } from '@/lib/haptics';
 import { SearchBar } from '@/components/SearchBar';
 import { TrackCover } from '@/components/TrackCover';
 import { useLibrary } from '@/library/LibraryProvider';
@@ -113,9 +115,9 @@ export default function BulkDissociateAlbumsScreen() {
     }
     if (outcome.failed === 0 && outcome.written > 0) {
       setSelected(new Set());
-      Alert.alert(
-        'Albums dissociés',
-        `${outcome.written} titre${outcome.written > 1 ? 's' : ''} dissocié${outcome.written > 1 ? 's' : ''} de leur album.`
+      showToast(
+        `${outcome.written} titre${outcome.written > 1 ? 's' : ''} dissocié${outcome.written > 1 ? 's' : ''} de leur album`,
+        'link_off'
       );
       router.back();
     } else if (outcome.written === 0) {
@@ -135,7 +137,14 @@ export default function BulkDissociateAlbumsScreen() {
       `Le tag album sera vidé dans ${trackCount} fichier${trackCount > 1 ? 's' : ''}. Réversible via la restauration des tags.`,
       [
         { text: 'Annuler', style: 'cancel' },
-        { text: 'Dissocier', style: 'destructive', onPress: () => void run() },
+        {
+          text: 'Dissocier',
+          style: 'destructive',
+          onPress: () => {
+            tapMedium();
+            void run();
+          },
+        },
       ]
     );
   };

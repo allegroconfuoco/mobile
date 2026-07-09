@@ -17,6 +17,8 @@ import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { colors } from '@/theme';
+import { ToastHost, showToast } from '@/components/Toast';
+import { subscribePlaybackError } from '@/player/playbackErrors';
 import { AuthProvider, useAuth } from '@/auth/AuthProvider';
 import { PlayerProvider } from '@/player/PlayerProvider';
 import { LibraryProvider } from '@/library/LibraryProvider';
@@ -52,6 +54,8 @@ export default function RootLayout() {
               <SyncProvider>
                 <PlayerProvider>
                   <RootNavigator fontsReady={loaded || error != null} />
+                  {/* Host racine du toast (les modaux natifs montent le leur, cf. Toast.tsx). */}
+                  <ToastHost />
                 </PlayerProvider>
               </SyncProvider>
             </FavoritesProvider>
@@ -80,6 +84,9 @@ function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
       SplashScreen.hideAsync();
     }
   }, [ready]);
+
+  // Erreurs de lecture (relayées par le service RNTP, cf. playbackErrors) → toast au premier plan.
+  useEffect(() => subscribePlaybackError((e) => showToast(e.message, 'music_off')), []);
 
   // Splash visible tant que polices/session ne sont pas prêtes.
   if (!ready) {

@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, spacing, typography } from '@/theme';
 import { Icon, type IconName } from '@/components/Icon';
 import { MiniPlayer } from '@/components/MiniPlayer';
+import { reportBottomChromeHeight } from '@/lib/bottomChrome';
 
 /**
  * Barre de navigation « Forge » (Direction B) + mini-player persistant.
@@ -24,7 +25,11 @@ export function ForgeTabBar({ state, descriptors, navigation }: BottomTabBarProp
   const insets = useSafeAreaInsets();
 
   return (
-    <View style={styles.wrapper}>
+    <View
+      style={styles.wrapper}
+      // Hauteur du chrome bas (mini-player + barre + inset) rapportée pour positionner le toast.
+      onLayout={(e) => reportBottomChromeHeight(e.nativeEvent.layout.height)}
+    >
       <MiniPlayer />
 
       <View style={[styles.bar, { paddingBottom: insets.bottom }]}>

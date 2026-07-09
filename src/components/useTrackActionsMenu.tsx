@@ -3,6 +3,8 @@ import { useRouter } from 'expo-router';
 
 import { TrackActionsSheet } from '@/components/TrackActionsSheet';
 import { PlaylistPickerSheet } from '@/components/PlaylistPickerSheet';
+import { showToast } from '@/components/Toast';
+import { tapLight } from '@/lib/haptics';
 import { useLibrary } from '@/library/LibraryProvider';
 import { useFavorites } from '@/library/FavoritesProvider';
 import type { LocalTrack } from '@/library/useAudioLibrary';
@@ -40,9 +42,28 @@ export function useTrackActionsMenu(): {
         title={menuTrack?.title ?? null}
         isFavorite={menuTrack ? isFavorite(menuTrack.id) : false}
         onClose={() => setMenuTrack(null)}
-        onPlayNext={() => menuTrack && void playNext([menuTrack])}
-        onAddToQueue={() => menuTrack && void addToQueue([menuTrack])}
-        onToggleFavorite={() => menuTrack && toggleFavorite(menuTrack.id, menuTrack.mbid)}
+        onPlayNext={() => {
+          if (menuTrack) {
+            tapLight();
+            void playNext([menuTrack]);
+            showToast('Lira ensuite', 'queue_music');
+          }
+        }}
+        onAddToQueue={() => {
+          if (menuTrack) {
+            tapLight();
+            void addToQueue([menuTrack]);
+            showToast('Ajouté à la file', 'queue_music');
+          }
+        }}
+        onToggleFavorite={() => {
+          if (menuTrack) {
+            const wasFavorite = isFavorite(menuTrack.id);
+            tapLight();
+            toggleFavorite(menuTrack.id, menuTrack.mbid);
+            showToast(wasFavorite ? 'Retiré des favoris' : 'Ajouté aux favoris', 'favorite');
+          }
+        }}
         onAddToPlaylist={() => setPickerTrack(menuTrack)}
         onFixMetadata={() =>
           menuTrack && router.push({ pathname: '/metadata-fix', params: { trackId: menuTrack.id } })
@@ -59,7 +80,12 @@ export function useTrackActionsMenu(): {
         }
         onRestoreFile={() => menuTrack && confirmRestoreTags(menuTrack, reloadTracks)}
         hasFileBackup={menuTrack ? db.hasTagBackup(menuTrack.id) : false}
-        onExclude={() => menuTrack && setTrackExcluded(menuTrack.id, true)}
+        onExclude={() => {
+          if (menuTrack) {
+            setTrackExcluded(menuTrack.id, true);
+            showToast('Piste exclue de la bibliothèque', 'block');
+          }
+        }}
       />
 
       <PlaylistPickerSheet track={pickerTrack} onClose={() => setPickerTrack(null)} />

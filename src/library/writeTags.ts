@@ -22,6 +22,7 @@ import { File, FileMode } from 'expo-file-system';
 import * as IntentLauncher from 'expo-intent-launcher';
 import * as Application from 'expo-application';
 
+import { showToast } from '@/components/Toast';
 import { hasId3v2, id3v2BodySize, parseId3v2, type ParsedTags } from './id3';
 import { buildId3v2, replaceId3, type WritablePicture, type WritableTags } from './id3Writer';
 import * as db from './db';
@@ -350,7 +351,7 @@ async function runRestore(track: LocalTrack, onWritten: () => void): Promise<voi
   const result = await restoreTags(track);
   if (result === 'written') {
     onWritten();
-    Alert.alert('Tags restaurés', 'Les tags d’origine ont été réécrits dans le fichier.');
+    showToast('Tags d’origine restaurés', 'settings_backup_restore');
   } else if (result === 'permission-needed') {
     alertPermissionNeeded('Relance ensuite la restauration.');
   } else if (result === 'no-backup') {

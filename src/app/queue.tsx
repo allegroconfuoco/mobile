@@ -6,6 +6,7 @@ import { useMemo } from 'react';
 
 import { colors, spacing, typography } from '@/theme';
 import { Icon } from '@/components/Icon';
+import { ToastHost } from '@/components/Toast';
 import { DraggableTrackList, type DraggableTrackItem } from '@/components/DraggableTrackList';
 import { usePlayer, useQueue } from '@/player/PlayerProvider';
 import { usePlayback } from '@/player/usePlayback';
@@ -75,6 +76,9 @@ export default function QueueScreen() {
           contentPaddingBottom={insets.bottom + spacing.xxl}
         />
       )}
+
+      {/* Modal natif : le host racine ne passe pas au-dessus, on monte le nôtre (cf. Toast.tsx). */}
+      <ToastHost variant="modal" />
     </View>
   );
 }

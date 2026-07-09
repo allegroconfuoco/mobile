@@ -6,6 +6,8 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { colors, radii, spacing, typography } from '@/theme';
 import { BackButton } from '@/components/BackButton';
 import { Icon } from '@/components/Icon';
+import { showToast } from '@/components/Toast';
+import { tapMedium } from '@/lib/haptics';
 import { DraggableTrackList, type DraggableTrackItem } from '@/components/DraggableTrackList';
 import { PlaylistNameDialog } from '@/components/PlaylistNameDialog';
 import { useTrackActionsMenu } from '@/components/useTrackActionsMenu';
@@ -115,7 +117,9 @@ export default function PlaylistScreen() {
         text: 'Supprimer',
         style: 'destructive',
         onPress: () => {
+          tapMedium();
           deletePlaylist(id);
+          showToast('Playlist supprimée', 'delete');
           router.back();
         },
       },

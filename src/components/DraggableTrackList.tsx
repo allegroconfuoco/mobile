@@ -12,6 +12,7 @@ import { Image } from 'expo-image';
 
 import { colors, coverFallback, radii, spacing, typography } from '@/theme';
 import { Icon } from '@/components/Icon';
+import { selection, tapLight } from '@/lib/haptics';
 
 /**
  * Liste de pistes réordonnable par glisser-déposer, sans dépendance native.
@@ -98,6 +99,7 @@ export function DraggableTrackList({
   }
 
   const startDrag = (index: number) => {
+    selection();
     pan.setValue(0);
     setDraggingIndex(index);
     setHoverIndex(index);
@@ -112,6 +114,7 @@ export function DraggableTrackList({
   const endDrag = (index: number) => {
     const to = hoverIndex ?? index;
     if (to !== index) {
+      tapLight();
       setData((current) => arrayMove(current, index, to));
       onMove(index, to);
     }

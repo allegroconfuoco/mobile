@@ -5,6 +5,8 @@ import { type Href, useRouter } from 'expo-router';
 
 import { colors, radii, spacing, typography } from '@/theme';
 import { Icon, type IconName } from '@/components/Icon';
+import { showToast } from '@/components/Toast';
+import { tapMedium } from '@/lib/haptics';
 import { useAuth } from '@/auth/AuthProvider';
 import { useLibrary } from '@/library/LibraryProvider';
 import { coverCacheSize } from '@/library/trackTags';
@@ -59,15 +61,16 @@ export default function SettingsScreen() {
           text: 'Vider',
           style: 'destructive',
           onPress: () => {
+            tapMedium();
             setClearing(true);
             void clearCache()
               .then((freed) => {
                 setCacheSize(0);
-                Alert.alert(
-                  'Cache vidé',
+                showToast(
                   freed > 0
-                    ? `${formatBytes(freed)} libérés. La bibliothèque a été re-scannée.`
-                    : 'La bibliothèque a été re-scannée.'
+                    ? `Cache vidé · ${formatBytes(freed)} libérés`
+                    : 'Cache vidé, bibliothèque re-scannée',
+                  'delete_sweep'
                 );
               })
               .catch(() => Alert.alert('Échec', "Le vidage du cache n'a pas abouti."))
@@ -121,7 +124,14 @@ export default function SettingsScreen() {
   const confirmSignOut = () => {
     Alert.alert('Se déconnecter', 'Tu devras te reconnecter pour synchroniser tes playlists.', [
       { text: 'Annuler', style: 'cancel' },
-      { text: 'Se déconnecter', style: 'destructive', onPress: () => void signOut() },
+      {
+        text: 'Se déconnecter',
+        style: 'destructive',
+        onPress: () => {
+          tapMedium();
+          void signOut();
+        },
+      },
     ]);
   };
 

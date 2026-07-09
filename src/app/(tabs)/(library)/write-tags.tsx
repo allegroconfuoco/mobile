@@ -31,6 +31,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BackButton } from '@/components/BackButton';
 import { Icon } from '@/components/Icon';
+import { showToast } from '@/components/Toast';
 import { TrackTagEditor } from '@/components/TrackTagEditor';
 import { useLibrary } from '@/library/LibraryProvider';
 import { usePlaylistsContext } from '@/library/PlaylistsProvider';
@@ -150,11 +151,11 @@ export default function WriteTagsScreen() {
     }
     const failed = outcome.failed + missing;
     if (failed === 0) {
-      Alert.alert(
-        'Fichiers mis à jour',
+      showToast(
         outcome.written > 1
-          ? `${outcome.written} pistes écrites.`
-          : 'Les infos ont été écrites dans le fichier.'
+          ? `${outcome.written} pistes écrites dans les fichiers`
+          : 'Infos écrites dans le fichier',
+        'save'
       );
       router.back();
     } else {
