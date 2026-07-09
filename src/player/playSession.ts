@@ -21,6 +21,7 @@ export type PlayContext =
   | 'favorites'
   | 'queue'
   | 'history'
+  | 'stats'
   | `playlist:${string}`;
 
 /** Un événement d'écoute prêt à persister — sans l'id partagé, résolu par la couche base. */

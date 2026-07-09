@@ -5,10 +5,10 @@
 
 /** Durée lisible : « 45 s », « 3 min », « 1 h 12 min ». */
 export function formatDuration(ms: number): string {
-  const totalMinutes = Math.round(ms / 60_000);
-  if (totalMinutes < 1) {
+  if (ms < 60_000) {
     return `${Math.max(1, Math.round(ms / 1000))} s`;
   }
+  const totalMinutes = Math.round(ms / 60_000);
   if (totalMinutes < 60) {
     return `${totalMinutes} min`;
   }
