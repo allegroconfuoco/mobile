@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { FlatList, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -7,7 +7,7 @@ import { colors, radii, spacing, typography } from '@/theme';
 import { Icon } from '@/components/Icon';
 import { BackButton } from '@/components/BackButton';
 import { PressableScale } from '@/components/PressableScale';
-import { TrackRow } from '@/components/TrackRow';
+import { TrackIndexRow, trackRowLayout } from '@/components/TrackRow';
 import { useTrackActionsMenu } from '@/components/useTrackActionsMenu';
 import type { LocalTrack } from '@/library/useAudioLibrary';
 import { useLibrary } from '@/library/LibraryProvider';
@@ -37,6 +37,12 @@ export default function FavoritesScreen() {
     }
     return list;
   }, [favoriteIds, tracksById]);
+
+  // Handler stable pour les lignes mémoïsées (cf. TrackIndexRow).
+  const playFrom = useCallback(
+    (index: number) => void playQueue(tracks, index),
+    [playQueue, tracks]
+  );
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + spacing.sm }]}>
@@ -68,12 +74,17 @@ export default function FavoritesScreen() {
       <FlatList
         data={tracks}
         keyExtractor={(track) => track.id}
+        getItemLayout={trackRowLayout}
+        windowSize={7}
+        initialNumToRender={12}
+        maxToRenderPerBatch={16}
         renderItem={({ item, index }) => (
-          <TrackRow
+          <TrackIndexRow
             track={item}
+            index={index}
             isActive={item.id === activeTrack?.id}
-            onPress={() => void playQueue(tracks, index)}
-            onLongPress={() => trackMenu.open(item)}
+            onPlay={playFrom}
+            onLongPress={trackMenu.open}
           />
         )}
         ListEmptyComponent={

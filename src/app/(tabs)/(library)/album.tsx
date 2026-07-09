@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { Pressable, SectionList, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -7,7 +7,7 @@ import { colors, radii, spacing, typography } from '@/theme';
 import { BackButton } from '@/components/BackButton';
 import { Icon } from '@/components/Icon';
 import { TrackCover } from '@/components/TrackCover';
-import { TrackRow } from '@/components/TrackRow';
+import { TrackIndexRow } from '@/components/TrackRow';
 import { useTrackActionsMenu } from '@/components/useTrackActionsMenu';
 import {
   groupAlbumRowsByDisc,
@@ -77,6 +77,12 @@ export default function AlbumScreen() {
   // Bac « Album inconnu » d'un artiste connu : les titres viennent de plusieurs albums, un match
   // release unique (identify) n'a pas de sens — on propose le multi-match qui range chaque titre.
   const isUnknownBucket = title === UNKNOWN_ALBUM && artist !== UNKNOWN_ARTIST;
+
+  // Handler stable pour les lignes mémoïsées (cf. TrackIndexRow).
+  const playFrom = useCallback(
+    (index: number) => void playQueue(albumTracks, index),
+    [playQueue, albumTracks]
+  );
 
   const identify = () => router.push({ pathname: '/identify-album', params: { artist, title } });
   const sortUnknown = () => router.push({ pathname: '/sort-unknown-album', params: { artist } });
@@ -188,18 +194,20 @@ export default function AlbumScreen() {
         }
         renderItem={({ item }) =>
           item.kind === 'local' ? (
-            <TrackRow
+            <TrackIndexRow
               track={item.track}
+              index={indexById.get(item.track.id) ?? 0}
               isActive={item.track.id === activeTrack?.id}
               leadingNumber={item.track.trackNo ?? (indexById.get(item.track.id) ?? 0) + 1}
               subtitle={item.track.artist ?? UNKNOWN_ARTIST}
-              onPress={() => void playQueue(albumTracks, indexById.get(item.track.id) ?? 0)}
-              onLongPress={() => trackMenu.open(item.track)}
+              onPlay={playFrom}
+              onLongPress={trackMenu.open}
             />
           ) : (
             <GhostRow position={item.position} title={item.title} />
           )
         }
+        windowSize={7}
         ListEmptyComponent={<Text style={styles.empty}>Album introuvable.</Text>}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}

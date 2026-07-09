@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { Pressable, SectionList, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -6,7 +6,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { colors, spacing, typography } from '@/theme';
 import { BackButton } from '@/components/BackButton';
 import { Icon } from '@/components/Icon';
-import { TrackRow } from '@/components/TrackRow';
+import { TrackIndexRow } from '@/components/TrackRow';
 import { useTrackActionsMenu } from '@/components/useTrackActionsMenu';
 import {
   buildAlbums,
@@ -59,6 +59,9 @@ export default function ArtistScreen() {
     return map;
   }, [queue]);
 
+  // Handler stable pour les lignes mémoïsées (cf. TrackIndexRow).
+  const playFrom = useCallback((index: number) => void playQueue(queue, index), [playQueue, queue]);
+
   return (
     <View style={[styles.screen, { paddingTop: insets.top + spacing.sm }]}>
       <View style={styles.topBar}>
@@ -106,16 +109,18 @@ export default function ArtistScreen() {
           />
         )}
         renderItem={({ item, index }) => (
-          <TrackRow
+          <TrackIndexRow
             track={item}
+            index={indexById.get(item.id) ?? 0}
             isActive={item.id === activeTrack?.id}
             leadingNumber={item.trackNo ?? index + 1}
             // L'album est déjà dans l'en-tête de section : sous-titre masqué pour ne pas répéter.
             subtitle=""
-            onPress={() => void playQueue(queue, indexById.get(item.id) ?? 0)}
-            onLongPress={() => trackMenu.open(item)}
+            onPlay={playFrom}
+            onLongPress={trackMenu.open}
           />
         )}
+        windowSize={7}
         ListEmptyComponent={<Text style={styles.empty}>Artiste introuvable.</Text>}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}

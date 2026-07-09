@@ -49,6 +49,8 @@ export function TrackCover({
         style={[box, styles.image, style] as StyleProp<ImageStyle>}
         contentFit="cover"
         transition={120}
+        // Vue recyclée par une liste : évite le flash de l'ancienne image le temps du chargement.
+        recyclingKey={uri}
         onError={() => setFailedUri(uri)}
         accessible={false}
       />

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -18,7 +18,7 @@ import { SegmentedControl, type Segment } from '@/components/SegmentedControl';
 import { useTrackActionsMenu } from '@/components/useTrackActionsMenu';
 import { PlaylistNameDialog } from '@/components/PlaylistNameDialog';
 import { TrackCover } from '@/components/TrackCover';
-import { TrackRow } from '@/components/TrackRow';
+import { TrackIndexRow, trackRowLayout } from '@/components/TrackRow';
 import type { LibraryStatus, LocalTrack } from '@/library/useAudioLibrary';
 import {
   filterAlbums,
@@ -132,6 +132,23 @@ function LibraryContent({
   const filteredArtists = useMemo(() => filterArtists(artists, query), [artists, query]);
   const filteredAlbums = useMemo(() => filterAlbums(albums, query), [albums, query]);
 
+  // Handlers stables (référence conservée entre rendus) : condition pour que le `memo` des lignes
+  // de liste soit effectif — une closure recréée à chaque rendu invaliderait toutes les lignes.
+  const playFromFiltered = useCallback(
+    // La file de lecture reprend exactement la liste filtrée affichée.
+    (index: number) => void playQueue(filteredTracks, index),
+    [playQueue, filteredTracks]
+  );
+  const openArtist = useCallback(
+    (name: string) => router.push({ pathname: '/artist', params: { name } }),
+    [router]
+  );
+  const openAlbum = useCallback(
+    (album: AlbumGroup) =>
+      router.push({ pathname: '/album', params: { artist: album.artist, title: album.title } }),
+    [router]
+  );
+
   return (
     <>
       {view === 'tracks' && (
@@ -141,30 +158,14 @@ function LibraryContent({
           activeId={activeTrack?.id}
           sort={trackSort}
           onToggleSort={() => setTrackSort(trackSort === 'title' ? 'artist' : 'title')}
-          // La file de lecture reprend exactement la liste filtrée affichée.
-          onPlay={(index) => void playQueue(filteredTracks, index)}
+          onPlay={playFromFiltered}
           onLongPress={trackMenu.open}
         />
       )}
       {view === 'artists' && (
-        <ArtistsView
-          artists={filteredArtists}
-          query={query}
-          onOpen={(name) => router.push({ pathname: '/artist', params: { name } })}
-        />
+        <ArtistsView artists={filteredArtists} query={query} onOpen={openArtist} />
       )}
-      {view === 'albums' && (
-        <AlbumsView
-          albums={filteredAlbums}
-          query={query}
-          onOpen={(album) =>
-            router.push({
-              pathname: '/album',
-              params: { artist: album.artist, title: album.title },
-            })
-          }
-        />
-      )}
+      {view === 'albums' && <AlbumsView albums={filteredAlbums} query={query} onOpen={openAlbum} />}
       {view === 'playlists' && <PlaylistsView query={query} />}
 
       {trackMenu.element}
@@ -271,6 +272,8 @@ function PlaylistsView({ query }: { query: string }) {
   );
 }
 
+const trackKey = (track: LocalTrack) => track.id;
+
 /** Vue Morceaux : barre de tri + liste virtualisée. */
 function TracksView({
   tracks,
@@ -289,26 +292,37 @@ function TracksView({
   onPlay: (index: number) => void;
   onLongPress: (track: LocalTrack) => void;
 }) {
+  const renderItem = useCallback(
+    ({ item, index }: { item: LocalTrack; index: number }) => (
+      <TrackIndexRow
+        track={item}
+        index={index}
+        isActive={item.id === activeId}
+        onPlay={onPlay}
+        onLongPress={onLongPress}
+      />
+    ),
+    [activeId, onPlay, onLongPress]
+  );
+
   return (
-    <FlatList
-      data={tracks}
-      keyExtractor={(track) => track.id}
-      // On masque la barre de tri quand une recherche ne renvoie rien (seul le message reste).
-      ListHeaderComponent={
-        query && tracks.length === 0 ? null : <SortBar sort={sort} onToggle={onToggleSort} />
-      }
-      renderItem={({ item, index }) => (
-        <TrackRow
-          track={item}
-          isActive={item.id === activeId}
-          onPress={() => onPlay(index)}
-          onLongPress={() => onLongPress(item)}
-        />
-      )}
-      ListEmptyComponent={query ? <NoResults query={query} /> : null}
-      contentContainerStyle={styles.listContent}
-      showsVerticalScrollIndicator={false}
-    />
+    <>
+      {/* Barre de tri hors liste : hauteur d'items constante → `getItemLayout` exact. On la masque
+          quand une recherche ne renvoie rien (seul le message reste). */}
+      {!(query && tracks.length === 0) && <SortBar sort={sort} onToggle={onToggleSort} />}
+      <FlatList
+        data={tracks}
+        keyExtractor={trackKey}
+        getItemLayout={trackRowLayout}
+        renderItem={renderItem}
+        windowSize={7}
+        initialNumToRender={12}
+        maxToRenderPerBatch={16}
+        ListEmptyComponent={query ? <NoResults query={query} /> : null}
+        contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
+      />
+    </>
   );
 }
 
@@ -330,6 +344,37 @@ function SortBar({ sort, onToggle }: { sort: TrackSort; onToggle: () => void }) 
   );
 }
 
+const artistKey = (artist: ArtistGroup) => artist.name;
+
+/** Ligne d'artiste mémoïsée : mêmes hauteur/padding qu'une ligne de piste (44 + 2 × md). */
+const ArtistRow = memo(function ArtistRow({
+  artist,
+  onOpen,
+}: {
+  artist: ArtistGroup;
+  onOpen: (name: string) => void;
+}) {
+  return (
+    <Pressable
+      onPress={() => onOpen(artist.name)}
+      style={({ pressed }) => [styles.artistRow, pressed && styles.rowPressed]}
+      accessibilityRole="button"
+      accessibilityLabel={`Artiste ${artist.name}`}
+    >
+      <TrackCover uri={artist.artworkUri} fallbackIcon="person" seed={artist.name} />
+      <View style={styles.artistText}>
+        <Text style={styles.artistName} numberOfLines={1}>
+          {artist.name}
+        </Text>
+        <Text style={styles.artistMeta} numberOfLines={1}>
+          {countLabel(artist.trackCount, 'titre')} · {countLabel(artist.albumCount, 'album')}
+        </Text>
+      </View>
+      <Icon name="chevron_right" size={22} color={colors.textMuted} />
+    </Pressable>
+  );
+});
+
 /** Vue Artistes : liste des artistes agrégés. */
 function ArtistsView({
   artists,
@@ -340,35 +385,59 @@ function ArtistsView({
   query: string;
   onOpen: (name: string) => void;
 }) {
+  const renderItem = useCallback(
+    ({ item }: { item: ArtistGroup }) => <ArtistRow artist={item} onOpen={onOpen} />,
+    [onOpen]
+  );
+
   return (
     <FlatList
       data={artists}
-      keyExtractor={(artist) => artist.name}
+      keyExtractor={artistKey}
+      getItemLayout={trackRowLayout}
+      windowSize={7}
+      initialNumToRender={12}
+      maxToRenderPerBatch={16}
       ListEmptyComponent={query ? <NoResults query={query} /> : null}
-      renderItem={({ item }) => (
-        <Pressable
-          onPress={() => onOpen(item.name)}
-          style={({ pressed }) => [styles.artistRow, pressed && styles.rowPressed]}
-          accessibilityRole="button"
-          accessibilityLabel={`Artiste ${item.name}`}
-        >
-          <TrackCover uri={item.artworkUri} fallbackIcon="person" seed={item.name} />
-          <View style={styles.artistText}>
-            <Text style={styles.artistName} numberOfLines={1}>
-              {item.name}
-            </Text>
-            <Text style={styles.artistMeta} numberOfLines={1}>
-              {countLabel(item.trackCount, 'titre')} · {countLabel(item.albumCount, 'album')}
-            </Text>
-          </View>
-          <Icon name="chevron_right" size={22} color={colors.textMuted} />
-        </Pressable>
-      )}
+      renderItem={renderItem}
       contentContainerStyle={styles.listContent}
       showsVerticalScrollIndicator={false}
     />
   );
 }
+
+const albumKey = (album: AlbumGroup) => album.key;
+
+/** Tuile d'album mémoïsée (hauteur variable — carré selon la largeur — donc pas de getItemLayout). */
+const AlbumTile = memo(function AlbumTile({
+  album,
+  onOpen,
+}: {
+  album: AlbumGroup;
+  onOpen: (album: AlbumGroup) => void;
+}) {
+  return (
+    <Pressable
+      onPress={() => onOpen(album)}
+      style={styles.albumTile}
+      accessibilityRole="button"
+      accessibilityLabel={`Album ${album.title}, ${album.artist}`}
+    >
+      <TrackCover
+        uri={album.artworkUri}
+        fill
+        fallbackIcon="album"
+        seed={`${album.title}${album.artist}`}
+      />
+      <Text style={styles.albumTitle} numberOfLines={1}>
+        {album.title}
+      </Text>
+      <Text style={styles.albumArtist} numberOfLines={1}>
+        {album.artist}
+      </Text>
+    </Pressable>
+  );
+});
 
 /** Vue Albums : grille de pochettes. */
 function AlbumsView({
@@ -380,34 +449,22 @@ function AlbumsView({
   query: string;
   onOpen: (album: AlbumGroup) => void;
 }) {
+  const renderItem = useCallback(
+    ({ item }: { item: AlbumGroup }) => <AlbumTile album={item} onOpen={onOpen} />,
+    [onOpen]
+  );
+
   return (
     <FlatList
       data={albums}
-      keyExtractor={(album) => album.key}
+      keyExtractor={albumKey}
       numColumns={2}
       columnWrapperStyle={styles.albumRow}
+      windowSize={5}
+      initialNumToRender={8}
+      maxToRenderPerBatch={8}
       ListEmptyComponent={query ? <NoResults query={query} /> : null}
-      renderItem={({ item }) => (
-        <Pressable
-          onPress={() => onOpen(item)}
-          style={styles.albumTile}
-          accessibilityRole="button"
-          accessibilityLabel={`Album ${item.title}, ${item.artist}`}
-        >
-          <TrackCover
-            uri={item.artworkUri}
-            fill
-            fallbackIcon="album"
-            seed={`${item.title}${item.artist}`}
-          />
-          <Text style={styles.albumTitle} numberOfLines={1}>
-            {item.title}
-          </Text>
-          <Text style={styles.albumArtist} numberOfLines={1}>
-            {item.artist}
-          </Text>
-        </Pressable>
-      )}
+      renderItem={renderItem}
       contentContainerStyle={styles.albumsContent}
       showsVerticalScrollIndicator={false}
     />
