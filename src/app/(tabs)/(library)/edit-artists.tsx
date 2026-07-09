@@ -22,10 +22,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BackButton } from '@/components/BackButton';
 import { Icon } from '@/components/Icon';
+import { showToast } from '@/components/Toast';
+import { tapMedium } from '@/lib/haptics';
 import { removeArtist, splitArtists } from '@/library/artists';
 import * as db from '@/library/db';
 import { makeAlbumKey, normalizeForSearch, tracksForAlbum } from '@/library/grouping';
 import { useLibrary } from '@/library/LibraryProvider';
+import type { LocalTrack } from '@/library/useAudioLibrary';
+import { alertPermissionNeeded, graveMany, type WriteSpec } from '@/library/writeTags';
 import { colors, fontFamily, radii, spacing, typography } from '@/theme';
 
 type Params = {
@@ -96,21 +100,81 @@ export default function EditArtistsScreen() {
   const isAlbum = params.scope === 'album';
   const subtitle = params.label ?? (isAlbum ? `${targetTracks.length} titres` : null);
 
-  // Applique la suppression d'un artiste à toutes les pistes visées où il apparaît.
+  const [writing, setWriting] = useState(false);
+
+  /**
+   * Applique la suppression d'un artiste à toutes les pistes visées où il apparaît.
+   *
+   * Deux modes (lot 9 de l'audit) : `grave=false` = overlay réversible historique
+   * (`artist_override`, ne touche pas le fichier) ; `grave=true` = **écrit le tag artiste corrigé
+   * dans les MP3** (via `graveMany`, backup `track_tag_backup` automatique) puis purge l'override
+   * des pistes écrites (sinon `loadTracks` masquerait le tag frais) — motif de `bulk-set-artist`.
+   * Un refus de permission retombe sur l'overlay pour ne pas perdre la correction.
+   */
   const applyRemoval = useCallback(
-    (name: string) => {
-      let changed = 0;
+    async (name: string, grave: boolean) => {
+      const changes: { track: LocalTrack; next: string }[] = [];
       for (const t of targetTracks) {
         const next = removeArtist(t.artist, name);
         // `null` = retirer viderait le champ (seul artiste) → on ne touche pas cette piste.
         if (next != null && next !== (t.artist ?? '')) {
-          db.setArtistOverride(t.id, next, Date.now());
-          changed += 1;
+          changes.push({ track: t, next });
         }
       }
-      if (changed > 0) {
-        reloadTracks();
+      if (changes.length === 0) {
+        return;
       }
+
+      if (!grave) {
+        for (const { track, next } of changes) {
+          db.setArtistOverride(track.id, next, Date.now());
+        }
+        reloadTracks();
+        showToast(`« ${name} » retiré (réversible)`, 'person_remove');
+        return;
+      }
+
+      setWriting(true);
+      const items: { track: LocalTrack; spec: WriteSpec }[] = changes.map(({ track, next }) => ({
+        track,
+        spec: {
+          tags: {
+            title: track.title,
+            artist: next,
+            album: track.album,
+            albumArtist: track.albumArtist,
+            trackNo: track.trackNo,
+            discNo: track.discNo,
+          },
+          cover: 'keep',
+        },
+      }));
+      const outcome = await graveMany(items);
+      // Le tag est gravé : un override antérieur masquerait la nouvelle valeur → on le retire.
+      for (const id of outcome.writtenIds) {
+        db.clearArtistOverride(id);
+      }
+      setWriting(false);
+
+      if (outcome.permission) {
+        // Repli : les pistes non écrites reçoivent l'overlay, la correction n'est pas perdue.
+        const written = new Set(outcome.writtenIds);
+        for (const { track, next } of changes) {
+          if (!written.has(track.id)) {
+            db.setArtistOverride(track.id, next, Date.now());
+          }
+        }
+        reloadTracks();
+        alertPermissionNeeded('En attendant, la correction est posée en overlay réversible.');
+        return;
+      }
+      reloadTracks();
+      showToast(
+        outcome.failed === 0
+          ? `« ${name} » retiré, ${outcome.written} fichier${outcome.written > 1 ? 's' : ''} gravé${outcome.written > 1 ? 's' : ''}`
+          : `${outcome.written} gravé(s), ${outcome.failed} en échec`,
+        'save'
+      );
     },
     [targetTracks, reloadTracks]
   );
@@ -127,10 +191,18 @@ export default function EditArtistsScreen() {
     }
     Alert.alert(
       'Retirer cet artiste ?',
-      `« ${entry.name} » sera retiré de ${affected} titre${affected > 1 ? 's' : ''}. Réversible.`,
+      `« ${entry.name} » sera retiré de ${affected} titre${affected > 1 ? 's' : ''}. Graver écrit le tag corrigé dans les fichiers (sauvegarde restaurable) — une resynchro ne le perdra pas.`,
       [
         { text: 'Annuler', style: 'cancel' },
-        { text: 'Retirer', style: 'destructive', onPress: () => applyRemoval(entry.name) },
+        { text: 'Réversible', onPress: () => void applyRemoval(entry.name, false) },
+        {
+          text: 'Graver',
+          style: 'destructive',
+          onPress: () => {
+            tapMedium();
+            void applyRemoval(entry.name, true);
+          },
+        },
       ]
     );
   };
@@ -190,8 +262,9 @@ export default function EditArtistsScreen() {
           contentContainerStyle={styles.listContent}
           ListHeaderComponent={
             <Text style={styles.hint}>
-              Touche l’icône pour retirer un artiste{isAlbum ? ' de l’album' : ''}. La suppression
-              est réversible (elle ne modifie pas le fichier).
+              Touche l’icône pour retirer un artiste{isAlbum ? ' de l’album' : ''}. Deux modes :
+              réversible (overlay, sans toucher le fichier) ou gravé dans les MP3 (sauvegarde
+              restaurable).
             </Text>
           }
           renderItem={({ item }) => (
@@ -209,10 +282,12 @@ export default function EditArtistsScreen() {
               </View>
               <Pressable
                 onPress={() => confirmRemoval(item)}
+                disabled={writing}
                 hitSlop={10}
                 style={({ pressed }) => [styles.removeButton, pressed && styles.pressed]}
                 accessibilityRole="button"
                 accessibilityLabel={`Retirer ${item.name}`}
+                accessibilityState={{ disabled: writing, busy: writing }}
               >
                 <Icon name="person_remove" size={20} color={colors.accentIcon} />
               </Pressable>

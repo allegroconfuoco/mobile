@@ -89,6 +89,13 @@ export function initTrackReview(
   for (const key of ALL_FIELDS) {
     fields[key] = { source: defaultSource(base, mb, key), manual: '' };
   }
+  // Artiste effectif ≠ tag fichier (override de suppression d'artiste #12, ou tag re-gravé depuis
+  // la sauvegarde) : on le pré-remplit en « Perso » pour que la revue montre — et grave — la
+  // valeur corrigée au lieu de faire ressusciter l'ancien tag (limitation historique levée, lot 9).
+  const effectiveArtist = track.artist ?? '';
+  if (hasValue(effectiveArtist) && effectiveArtist !== (base.artist ?? '')) {
+    fields.artist = { source: 'manual', manual: effectiveArtist };
+  }
   return {
     trackId: track.id,
     filename: track.filename,
