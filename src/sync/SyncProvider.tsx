@@ -27,6 +27,7 @@ import { AppState, Platform } from 'react-native';
 
 import { useAuth } from '@/auth/AuthProvider';
 import { usePlaylistsContext } from '@/library/PlaylistsProvider';
+import { runPlaySync } from './playSync';
 import { runSync, type SyncResult } from './syncEngine';
 
 /** État de synchro exposé à l'UI. */
@@ -80,7 +81,17 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     const run = (async (): Promise<SyncResult> => {
       setStatus('syncing');
       try {
-        const result = await runSync(getAccessToken);
+        // Playlists d'abord (elle porte la gestion multi-comptes / wipe), puis l'historique
+        // d'écoute + handoff (#25). Le résultat exposé est le plus dégradé des deux, pour que
+        // l'indicateur hors-ligne/erreur reflète l'ensemble.
+        const playlistsResult = await runSync(getAccessToken);
+        const playsResult = await runPlaySync(getAccessToken);
+        const result: SyncResult =
+          playlistsResult === 'error' || playsResult === 'error'
+            ? 'error'
+            : playlistsResult === 'offline' || playsResult === 'offline'
+              ? 'offline'
+              : playlistsResult;
         if (result === 'ok') {
           // Le pull a pu changer la base : on rafraîchit l'UI. Ce `refresh()` incrémente
           // `revision` ; on note la valeur attendue pour que le déclencheur débouncé l'ignore.

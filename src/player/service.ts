@@ -52,8 +52,8 @@ export async function PlaybackService(): Promise<void> {
   // Minuteur de sommeil : vérifié ici (le service vit en arrière-plan, un setTimeout long serait
   // throttlé). Le tick de progression est déjà émis toutes les secondes (`setup.ts`) ; le même
   // tick alimente le temps écouté de l'historique (#25).
-  TrackPlayer.addEventListener(Event.PlaybackProgressUpdated, ({ duration }) => {
-    recorderOnProgressTick(duration);
+  TrackPlayer.addEventListener(Event.PlaybackProgressUpdated, ({ duration, position }) => {
+    recorderOnProgressTick(duration, position);
     void checkSleepTimer();
   });
   TrackPlayer.addEventListener(Event.PlaybackActiveTrackChanged, ({ track }) => {

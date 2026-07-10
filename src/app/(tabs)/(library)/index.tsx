@@ -18,6 +18,7 @@ import { SearchBar } from '@/components/SearchBar';
 import { SegmentedControl, type Segment } from '@/components/SegmentedControl';
 import { useTrackActionsMenu } from '@/components/useTrackActionsMenu';
 import { PlaylistNameDialog } from '@/components/PlaylistNameDialog';
+import { ResumeCard } from '@/components/ResumeCard';
 import { TrackCover } from '@/components/TrackCover';
 import { TrackIndexRow, trackRowLayout } from '@/components/TrackRow';
 import type { LibraryStatus, LocalTrack } from '@/library/useAudioLibrary';
@@ -111,6 +112,9 @@ export default function LibraryScreen() {
           </Pressable>
         )}
       </View>
+
+      {/* Reprise inter-appareils (#25) : bannière si un autre appareil a laissé une écoute en cours. */}
+      {hasContent && <ResumeCard />}
 
       {hasContent && <SegmentedControl segments={VIEWS} value={view} onChange={setView} />}
 

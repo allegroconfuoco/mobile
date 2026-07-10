@@ -22,6 +22,7 @@ export type PlayContext =
   | 'queue'
   | 'history'
   | 'stats'
+  | 'resume'
   | `playlist:${string}`;
 
 /** Un événement d'écoute prêt à persister — sans l'id partagé, résolu par la couche base. */
@@ -48,17 +49,28 @@ export type RecorderDeps = {
   persist: (draft: PlayDraft) => void;
 };
 
+/** Dernier état de lecture connu (position réelle), pour le handoff inter-appareils (#25). */
+export type PlaybackSnapshot = {
+  localTrackId: string;
+  positionMs: number;
+  isPlaying: boolean;
+  /** Dernier signe de vie (ms) : sert d'horodatage « activité locale » côté carte Reprendre. */
+  updatedAt: number;
+};
+
 export type PlayRecorder = {
   /** Pose le contexte du prochain lancement (appelé par `playQueue`). */
   setContext: (context: PlayContext | null) => void;
   /** Changement de piste active : clôt la session en cours, en ouvre une pour `next`. */
   onTrackChanged: (next: Track | undefined) => void;
-  /** Tick de progression (1 s, lecture en cours) : cumule le temps écouté. */
-  onProgressTick: (durationSeconds?: number) => void;
+  /** Tick de progression (1 s, lecture en cours) : cumule le temps écouté + suit la position. */
+  onProgressTick: (durationSeconds?: number, positionSeconds?: number) => void;
   /** Pause/arrêt : écrit l'état courant sans clore la session (une reprise cumulera dessus). */
   onPause: () => void;
   /** Fin de file (hors répétition) : clôt et écrit la session. */
   onQueueEnded: () => void;
+  /** État de lecture courant à pousser au serveur (handoff), ou `null` si rien n'a joué. */
+  getSnapshot: () => PlaybackSnapshot | null;
 };
 
 // En deçà, la session est du bruit (mauvais tap, skip immédiat) : jamais écrite.
@@ -83,6 +95,7 @@ type Session = {
 export function createPlayRecorder(deps: RecorderDeps): PlayRecorder {
   let session: Session | null = null;
   let context: PlayContext | null = null;
+  let snapshot: PlaybackSnapshot | null = null;
 
   const flush = (final: boolean): void => {
     const current = session;
@@ -131,9 +144,21 @@ export function createPlayRecorder(deps: RecorderDeps): PlayRecorder {
         durationMs: typeof next.duration === 'number' ? Math.round(next.duration * 1000) : null,
         context,
       };
+      // Nos flux lancent toujours la lecture au changement de piste (playQueue/skip).
+      snapshot = {
+        localTrackId: session.localTrackId,
+        positionMs: 0,
+        isPlaying: true,
+        updatedAt: deps.now(),
+      };
     },
 
-    onProgressTick(durationSeconds) {
+    onProgressTick(durationSeconds, positionSeconds) {
+      if (snapshot && positionSeconds != null) {
+        snapshot.positionMs = Math.round(positionSeconds * 1000);
+        snapshot.isPlaying = true;
+        snapshot.updatedAt = deps.now();
+      }
       if (!session) {
         return;
       }
@@ -145,11 +170,23 @@ export function createPlayRecorder(deps: RecorderDeps): PlayRecorder {
     },
 
     onPause() {
+      if (snapshot) {
+        snapshot.isPlaying = false;
+        snapshot.updatedAt = deps.now();
+      }
       flush(false);
     },
 
     onQueueEnded() {
+      if (snapshot) {
+        snapshot.isPlaying = false;
+        snapshot.updatedAt = deps.now();
+      }
       flush(true);
+    },
+
+    getSnapshot() {
+      return snapshot;
     },
   };
 }

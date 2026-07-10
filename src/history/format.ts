@@ -22,6 +22,14 @@ export function formatTime(ms: number): string {
   return new Date(ms).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 }
 
+/** Position dans une piste « m:ss » (ex. « 2:34 »), pour la carte Reprendre. */
+export function formatClock(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
 /** Clé de regroupement par jour local (stable pour les sections de l'historique). */
 export function dayKey(ms: number): string {
   const d = new Date(ms);

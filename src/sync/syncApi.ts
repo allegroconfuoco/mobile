@@ -10,15 +10,15 @@
  */
 import { ApiError } from '@/api/auth';
 import { apiUrl } from '@/api/config';
-import type { SyncRequest, SyncResponse } from './syncTypes';
+import type { PlaySyncRequest, PlaySyncResponse, SyncRequest, SyncResponse } from './syncTypes';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json', Accept: 'application/json' } as const;
 
-/** POST /api/sync/playlists avec le Bearer JWT. Lève `ApiError` (0 = réseau, sinon code HTTP). */
-export async function postPlaylistSync(token: string, request: SyncRequest): Promise<SyncResponse> {
+/** POST JSON authentifié vers un endpoint de synchro. Lève `ApiError` (0 = réseau, sinon HTTP). */
+async function postSync(token: string, path: string, request: unknown): Promise<unknown> {
   let response: Response;
   try {
-    response = await fetch(apiUrl('/api/sync/playlists'), {
+    response = await fetch(apiUrl(path), {
       method: 'POST',
       headers: { ...JSON_HEADERS, Authorization: `Bearer ${token}` },
       body: JSON.stringify(request),
@@ -40,5 +40,18 @@ export async function postPlaylistSync(token: string, request: SyncRequest): Pro
   if (!body || typeof body !== 'object') {
     throw new ApiError(0, 'Réponse de synchro inattendue.');
   }
-  return body as SyncResponse;
+  return body;
+}
+
+/** POST /api/sync/playlists avec le Bearer JWT. */
+export async function postPlaylistSync(token: string, request: SyncRequest): Promise<SyncResponse> {
+  return (await postSync(token, '/api/sync/playlists', request)) as SyncResponse;
+}
+
+/** POST /api/sync/plays (historique d'écoute + handoff, issue #25) avec le Bearer JWT. */
+export async function postPlaySync(
+  token: string,
+  request: PlaySyncRequest
+): Promise<PlaySyncResponse> {
+  return (await postSync(token, '/api/sync/plays', request)) as PlaySyncResponse;
 }
