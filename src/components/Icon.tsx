@@ -73,6 +73,8 @@ export type IconName =
   | 'timer'
   | 'history'
   | 'visibility_off'
+  | 'share'
+  | 'download'
   | 'logout';
 
 type IconProps = {

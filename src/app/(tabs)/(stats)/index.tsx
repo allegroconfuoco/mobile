@@ -1,7 +1,9 @@
 import { useCallback, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { File, Paths } from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 
 import { colors, radii, spacing, typography } from '@/theme';
 import { Icon } from '@/components/Icon';
@@ -11,14 +13,19 @@ import { TrackCover } from '@/components/TrackCover';
 import { tapLight } from '@/lib/haptics';
 import * as db from '@/library/db';
 import { useLibrary } from '@/library/LibraryProvider';
+import type { LocalTrack } from '@/library/useAudioLibrary';
 import { usePlayer } from '@/player/PlayerProvider';
 import { isIncognitoEnabled, setIncognitoEnabled } from '@/player/playRecorder';
+import { buildExportCsv, buildExportJson } from '@/history/exportData';
 import { formatDuration } from '@/history/format';
 import {
+  buildBadges,
   buildHeatmapGrid,
   buildTrend,
+  currentStreakDays,
   HEATMAP_DAYS,
   periodStartMs,
+  type Badge,
   type StatsPeriod,
   type TrendBucket,
 } from '@/history/stats';
@@ -47,10 +54,19 @@ type Dashboard = {
   heatmap: { grid: number[][]; max: number };
   /** Ratio de découverte — `null` sur « Toujours » (tout serait « nouveau », pas de sens). */
   discovery: { listened: number; discovered: number } | null;
+  /** Playlists virtuelles (Wrapped-lite) : calculées à la volée, jamais synchronisées. */
+  loop: db.TopTrackRow[];
+  year: db.TopTrackRow[];
+  /** Badges locaux, toujours calculés depuis toujours (indépendants de la période). */
+  badges: Badge[];
 };
+
+/** Taille des playlists virtuelles « En boucle » / « Top titres <année> ». */
+const VIRTUAL_SIZE = 25;
 
 function loadDashboard(period: StatsPeriod): Dashboard {
   const fromMs = periodStartMs(period);
+  const allTime = db.playTotals(null);
   return {
     totals: db.playTotals(fromMs),
     trend: buildTrend(db.listeningByDay(fromMs), period),
@@ -59,7 +75,40 @@ function loadDashboard(period: StatsPeriod): Dashboard {
     albums: db.topAlbums(fromMs, TOP_LIMIT),
     heatmap: buildHeatmapGrid(db.listeningHeatmap(fromMs)),
     discovery: fromMs != null ? db.discoveryStats(fromMs) : null,
+    loop: db.topTracks(Date.now() - 30 * 86_400_000, VIRTUAL_SIZE),
+    year: db.topTracks(new Date(new Date().getFullYear(), 0, 1).getTime(), VIRTUAL_SIZE),
+    badges: buildBadges({
+      playedMs: allTime.playedMs,
+      uniqueTracks: allTime.uniqueTracks,
+      uniqueArtists: db.distinctArtistCount(null),
+      streakDays: currentStreakDays(db.listeningByDay(null)),
+    }),
   };
+}
+
+/** Écrit puis partage l'export de l'historique (JSON ou CSV), via la feuille de partage système. */
+async function exportHistory(format: 'json' | 'csv'): Promise<void> {
+  const rows = db.loadPlayEventsForExport();
+  if (rows.length === 0) {
+    showToast('Aucune donnée à exporter', 'download');
+    return;
+  }
+  try {
+    if (!(await Sharing.isAvailableAsync())) {
+      showToast('Partage indisponible sur cet appareil', 'download');
+      return;
+    }
+    const content = format === 'json' ? buildExportJson(rows) : buildExportCsv(rows);
+    const file = new File(Paths.cache, `fuoco-historique.${format}`);
+    file.create({ overwrite: true });
+    file.write(content);
+    await Sharing.shareAsync(file.uri, {
+      mimeType: format === 'json' ? 'application/json' : 'text/csv',
+      dialogTitle: 'Exporter mon historique',
+    });
+  } catch {
+    showToast("Échec de l'export", 'download');
+  }
 }
 
 export default function StatsScreen() {
@@ -98,6 +147,30 @@ export default function StatsScreen() {
       return;
     }
     void playQueue([track], 0, 'stats');
+  };
+
+  // Playlist virtuelle : résout les tops en fichiers locaux (les absents sont omis) et joue.
+  const playVirtual = (rows: db.TopTrackRow[]) => {
+    const tracks = rows
+      .map((row) => (row.localTrackId ? tracksById.get(row.localTrackId) : undefined))
+      .filter((track): track is LocalTrack => track !== undefined);
+    if (tracks.length === 0) {
+      showToast('Aucun de ces titres n’est disponible ici', 'music_off');
+      return;
+    }
+    void playQueue(tracks, 0, 'stats');
+  };
+
+  const confirmExport = () => {
+    Alert.alert(
+      'Exporter mes données',
+      'Toutes tes écoutes (y compris supprimées, marquées comme telles) dans un fichier à partager ou archiver.',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        { text: 'CSV', onPress: () => void exportHistory('csv') },
+        { text: 'JSON', onPress: () => void exportHistory('json') },
+      ]
+    );
   };
 
   const { totals, discovery } = data;
@@ -181,8 +254,47 @@ export default function StatsScreen() {
               <NameRow key={`${row.name}-${row.artist ?? ''}`} rank={i + 1} row={row} />
             ))}
 
+            {(data.loop.length > 0 || data.year.length > 0) && (
+              <>
+                <SectionTitle label="En boucle" />
+                {data.loop.length > 0 && (
+                  <VirtualPlaylistRow
+                    icon="repeat"
+                    label="En boucle"
+                    hint={`Tes ${data.loop.length} titres les plus écoutés des 30 derniers jours`}
+                    onPlay={() => playVirtual(data.loop)}
+                  />
+                )}
+                {data.year.length > 0 && (
+                  <VirtualPlaylistRow
+                    icon="library_music"
+                    label={`Top titres ${new Date().getFullYear()}`}
+                    hint={`Tes ${data.year.length} titres les plus écoutés de l'année`}
+                    onPlay={() => playVirtual(data.year)}
+                  />
+                )}
+              </>
+            )}
+
             <SectionTitle label="Habitudes" />
             <Heatmap grid={data.heatmap.grid} max={data.heatmap.max} />
+
+            {data.badges.length > 0 && (
+              <>
+                <SectionTitle label="Badges" />
+                <View style={styles.badges}>
+                  {data.badges.map((badge) => (
+                    <View key={badge.label} style={styles.badge}>
+                      <Icon name={badge.icon} size={18} color={colors.accentIcon} />
+                      <View>
+                        <Text style={styles.badgeLabel}>{badge.label}</Text>
+                        <Text style={styles.badgeHint}>{badge.hint}</Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              </>
+            )}
           </>
         )}
 
@@ -202,6 +314,36 @@ export default function StatsScreen() {
                   ? `${totals.plays} écoute${totals.plays > 1 ? 's' : ''} sur la période`
                   : 'Aucune écoute pour l’instant'}
               </Text>
+            </View>
+            <Icon name="chevron_right" size={22} color={colors.textMuted} />
+          </Pressable>
+
+          {hasData && (
+            <Pressable
+              onPress={() => router.push({ pathname: '/share-card', params: { period } })}
+              style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+              accessibilityRole="button"
+              accessibilityLabel="Créer une carte à partager"
+            >
+              <Icon name="share" size={24} color={colors.accentIcon} />
+              <View style={styles.rowText}>
+                <Text style={styles.rowLabel}>Carte à partager</Text>
+                <Text style={styles.rowHint}>Un visuel de tes stats pour les stories</Text>
+              </View>
+              <Icon name="chevron_right" size={22} color={colors.textMuted} />
+            </Pressable>
+          )}
+
+          <Pressable
+            onPress={confirmExport}
+            style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Exporter mes données d'écoute"
+          >
+            <Icon name="download" size={24} color={colors.accentIcon} />
+            <View style={styles.rowText}>
+              <Text style={styles.rowLabel}>Exporter mes données</Text>
+              <Text style={styles.rowHint}>Historique complet en JSON ou CSV</Text>
             </View>
             <Icon name="chevron_right" size={22} color={colors.textMuted} />
           </Pressable>
@@ -257,6 +399,41 @@ function StatTile({
       <Text style={styles.tileLabel}>{label}</Text>
       {hint !== undefined && <Text style={styles.tileHint}>{hint}</Text>}
     </View>
+  );
+}
+
+/** Playlist virtuelle (Wrapped-lite) : calculée à la volée depuis les stats, jouable d'un tap. */
+function VirtualPlaylistRow({
+  icon,
+  label,
+  hint,
+  onPlay,
+}: {
+  icon: 'repeat' | 'library_music';
+  label: string;
+  hint: string;
+  onPlay: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPlay}
+      style={({ pressed }) => [styles.virtualRow, pressed && styles.rowPressed]}
+      accessibilityRole="button"
+      accessibilityLabel={`Lire ${label}`}
+    >
+      <View style={styles.virtualIcon}>
+        <Icon name={icon} size={22} color={colors.accentIcon} />
+      </View>
+      <View style={styles.topText}>
+        <Text style={styles.topLabel} numberOfLines={1}>
+          {label}
+        </Text>
+        <Text style={styles.topHint} numberOfLines={1}>
+          {hint}
+        </Text>
+      </View>
+      <Icon name="play_arrow" size={26} color={colors.accent} />
+    </Pressable>
   );
 }
 
@@ -489,6 +666,47 @@ const styles = StyleSheet.create({
     ...typography.body,
     flex: 1,
     fontSize: 9,
+    color: colors.textMuted,
+  },
+  virtualRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingHorizontal: spacing.xxl,
+    paddingVertical: spacing.md,
+  },
+  virtualIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: radii.sm,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badges: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.md,
+    paddingHorizontal: spacing.xxl,
+  },
+  badge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.surface,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  badgeLabel: {
+    ...typography.heading,
+    fontSize: 13,
+  },
+  badgeHint: {
+    ...typography.body,
+    fontSize: 10,
     color: colors.textMuted,
   },
   list: {

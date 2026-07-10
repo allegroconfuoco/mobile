@@ -126,6 +126,86 @@ export function buildTrend(
   return out;
 }
 
+/**
+ * Jours d'écoute **consécutifs** se terminant aujourd'hui (ou hier — la journée en cours ne
+ * casse pas la série tant qu'elle n'est pas finie). Base : totaux par jour (`listeningByDay`).
+ */
+export function currentStreakDays(rows: DayRow[], now: number = Date.now()): number {
+  const played = new Set(rows.filter((r) => r.playedMs > 0).map((r) => r.day));
+  const d = new Date(now);
+  d.setHours(0, 0, 0, 0);
+  // La série peut commencer hier si rien n'a encore été écouté aujourd'hui.
+  if (!played.has(localDayKey(d))) {
+    d.setDate(d.getDate() - 1);
+  }
+  let streak = 0;
+  while (played.has(localDayKey(d))) {
+    streak += 1;
+    d.setDate(d.getDate() - 1);
+  }
+  return streak;
+}
+
+/** Un badge gagné (gamification locale, #25). `icon` = sous-ensemble d'`IconName`. */
+export type Badge = {
+  icon: 'timer' | 'group' | 'library_music' | 'graphic_eq';
+  label: string;
+  hint: string;
+};
+
+/** Paliers par catégorie : on n'affiche que le plus haut atteint (pas de mur de badges). */
+const HOUR_STEPS = [500, 100, 50, 10, 1];
+const ARTIST_STEPS = [100, 50, 10];
+const TRACK_STEPS = [500, 200, 50];
+const STREAK_STEPS = [30, 7, 3];
+
+/**
+ * Badges gagnés sur les compteurs **depuis toujours**. Volontairement local et sobre :
+ * les badges comparatifs (« top 1 % des fans ») exigent d'autres utilisateurs → Phase 2.
+ */
+export function buildBadges(input: {
+  playedMs: number;
+  uniqueTracks: number;
+  uniqueArtists: number;
+  streakDays: number;
+}): Badge[] {
+  const out: Badge[] = [];
+  const hours = Math.floor(input.playedMs / 3_600_000);
+  const hourStep = HOUR_STEPS.find((step) => hours >= step);
+  if (hourStep !== undefined) {
+    out.push({
+      icon: 'timer',
+      label: `${hourStep} h d'écoute`,
+      hint: `${hours} h au total`,
+    });
+  }
+  const artistStep = ARTIST_STEPS.find((step) => input.uniqueArtists >= step);
+  if (artistStep !== undefined) {
+    out.push({
+      icon: 'group',
+      label: `${artistStep} artistes`,
+      hint: `${input.uniqueArtists} artistes écoutés`,
+    });
+  }
+  const trackStep = TRACK_STEPS.find((step) => input.uniqueTracks >= step);
+  if (trackStep !== undefined) {
+    out.push({
+      icon: 'library_music',
+      label: `${trackStep} titres`,
+      hint: `${input.uniqueTracks} titres différents`,
+    });
+  }
+  const streakStep = STREAK_STEPS.find((step) => input.streakDays >= step);
+  if (streakStep !== undefined) {
+    out.push({
+      icon: 'graphic_eq',
+      label: `${streakStep} jours d'affilée`,
+      hint: `Série en cours : ${input.streakDays} jours`,
+    });
+  }
+  return out;
+}
+
 export type HeatmapRow = { weekday: number; slot: number; playedMs: number };
 
 /** Libellés des lignes (lundi d'abord) et des colonnes (tranches de 3 h) de la heatmap. */
