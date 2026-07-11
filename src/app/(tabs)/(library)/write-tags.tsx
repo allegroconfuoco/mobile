@@ -98,10 +98,11 @@ export default function WriteTagsScreen() {
 
   const targetsById = useMemo(() => new Map(targets.map((t) => [t.id, t])), [targets]);
 
-  // État de revue, une entrée par piste : base (tag fichier) + MusicBrainz (overlay), en 2 requêtes.
+  // État de revue, une entrée par piste : base (tags fichier ACTUELS — reflète les gravures
+  // passées, cf. `loadFileTagsMany`) + MusicBrainz (overlay), en 2 requêtes.
   const [reviews, setReviews] = useState<TrackReview[]>(() => {
     const ids = targets.map((t) => t.id);
-    const base = db.loadBaseTagsMany(ids);
+    const base = db.loadFileTagsMany(ids);
     const mb = db.loadMbTagsMany(ids);
     return targets.map((t) =>
       initTrackReview(t, base.get(t.id) ?? EMPTY_BASE, mb.get(t.id) ?? null)

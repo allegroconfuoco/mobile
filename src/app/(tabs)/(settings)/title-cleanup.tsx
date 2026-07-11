@@ -10,9 +10,10 @@
  * défaut) → « Nettoyer N titres » = gravure ID3 via `graveMany` (backup `track_tag_backup`
  * automatique, arrêt au 1er refus de permission), puis `reloadTracks`.
  *
- * ⚠️ L'aperçu porte sur le **titre du fichier** (`loadBaseTagsMany`) : si une piste a un overlay
- * MusicBrainz (`recording_title`), l'affichage bibliothèque peut ne pas bouger après gravure —
- * un hint le rappelle.
+ * L'entrée de l'aperçu est le **titre fichier actuel** (`loadFileTagsMany` : colonnes `tracks`,
+ * tenues à jour à chaque gravure) — PAS la sauvegarde d'origine, sinon les titres déjà nettoyés
+ * re-apparaîtraient indéfiniment (bug corrigé). Les artistes **masqués** (`rewriteMasks`, appui
+ * long sur une ligne) sont exclus de l'aperçu, avec bascule pour les revoir.
  *
  * Paramètres de route (accès contextuel) : `artist` (pistes de l'artiste) OU `albumArtist`+`album`
  * (pistes de l'album) ; sans paramètre = toute la bibliothèque.
@@ -35,6 +36,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BackButton } from '@/components/BackButton';
 import { Icon } from '@/components/Icon';
+import { MaskBar } from '@/components/MaskBar';
 import { showToast } from '@/components/Toast';
 import { tapMedium } from '@/lib/haptics';
 import { SearchBar } from '@/components/SearchBar';
@@ -47,6 +49,7 @@ import {
   tracksForAlbum,
   tracksForArtist,
 } from '@/library/grouping';
+import { isMasked, loadMaskedArtists, maskSet, saveMaskedArtists } from '@/library/rewriteMasks';
 import { applyCleanupRules, CLEANUP_PRESETS, DEFAULT_RULES } from '@/library/titleCleanup';
 import type { LocalTrack } from '@/library/useAudioLibrary';
 import { alertPermissionNeeded, graveMany, type WriteSpec } from '@/library/writeTags';
@@ -109,9 +112,15 @@ export default function TitleCleanupScreen() {
   const [writing, setWriting] = useState(false);
   const [progress, setProgress] = useState(0);
 
-  // Titres côté fichier (sauvegarde d'origine sinon colonnes `tracks`) — l'entrée du nettoyage.
+  // Artistes masqués (« validés ») : leurs pistes sortent de l'aperçu, cf. `rewriteMasks`.
+  const [masks, setMasks] = useState<string[]>(loadMaskedArtists);
+  const [showMasked, setShowMasked] = useState(false);
+  const maskLookup = useMemo(() => maskSet(masks), [masks]);
+
+  // Titres **fichier actuels** (colonnes `tracks`, à jour après chaque gravure) — l'entrée du
+  // nettoyage. Surtout pas la sauvegarde d'origine : elle re-proposerait les titres déjà nettoyés.
   const baseTitles = useMemo(() => {
-    const base = db.loadBaseTagsMany(targets.map((t) => t.id));
+    const base = db.loadFileTagsMany(targets.map((t) => t.id));
     const map = new Map<string, string>();
     for (const t of targets) {
       map.set(t.id, base.get(t.id)?.title ?? t.title);
@@ -120,7 +129,7 @@ export default function TitleCleanupScreen() {
   }, [targets]);
 
   // Aperçu : seules les pistes dont le titre change apparaissent.
-  const changed = useMemo(() => {
+  const changedAll = useMemo(() => {
     const out: { track: LocalTrack; before: string; after: string }[] = [];
     for (const track of targets) {
       const before = baseTitles.get(track.id) ?? track.title;
@@ -131,6 +140,48 @@ export default function TitleCleanupScreen() {
     }
     return out;
   }, [targets, baseTitles, rules]);
+
+  const maskedCount = useMemo(
+    () => changedAll.filter((c) => isMasked(maskLookup, c.track.artist)).length,
+    [changedAll, maskLookup]
+  );
+  // La sélection et la gravure dérivent de `changed` : une piste masquée (non affichée) ne peut
+  // donc jamais être gravée par inadvertance.
+  const changed = useMemo(
+    () =>
+      showMasked ? changedAll : changedAll.filter((c) => !isMasked(maskLookup, c.track.artist)),
+    [changedAll, maskLookup, showMasked]
+  );
+
+  const addMask = (name: string | null) => {
+    if (!name || isMasked(maskLookup, name)) {
+      return;
+    }
+    const next = [...masks, name];
+    setMasks(next);
+    saveMaskedArtists(next);
+    showToast(`« ${name} » masqué des réécritures`, 'visibility_off');
+  };
+
+  const removeMask = (name: string) => {
+    const next = masks.filter((m) => m !== name);
+    setMasks(next);
+    saveMaskedArtists(next);
+  };
+
+  const confirmMask = (name: string | null) => {
+    if (!name) {
+      return;
+    }
+    Alert.alert(
+      'Masquer cet artiste ?',
+      `Les titres de « ${name} » seront cachés des écrans de réécriture. Réversible d’un tap sur la puce.`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        { text: 'Masquer', onPress: () => addMask(name) },
+      ]
+    );
+  };
 
   const visible = useMemo(() => {
     const byId = new Map(changed.map((c) => [c.track.id, c]));
@@ -312,12 +363,22 @@ export default function TitleCleanupScreen() {
             </Pressable>
           </View>
           <Text style={styles.hint}>
-            L’aperçu porte sur le titre du fichier ; une correction MusicBrainz (overlay) peut
-            continuer de primer à l’affichage.
+            L’aperçu porte sur le titre actuel du fichier. Appui long sur une ligne pour masquer son
+            artiste (validé) des réécritures.
           </Text>
         </View>
 
         <SearchBar value={query} onChangeText={setQuery} placeholder="Filtrer les titres" />
+
+        <View style={styles.maskBarWrap}>
+          <MaskBar
+            masks={masks}
+            maskedCount={maskedCount}
+            showMasked={showMasked}
+            onToggleShow={() => setShowMasked((v) => !v)}
+            onRemove={removeMask}
+          />
+        </View>
 
         <FlatList
           data={visible}
@@ -338,6 +399,7 @@ export default function TitleCleanupScreen() {
             return (
               <Pressable
                 onPress={() => toggle(item.track.id)}
+                onLongPress={() => confirmMask(item.track.artist)}
                 style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
                 accessibilityRole="checkbox"
                 accessibilityState={{ checked }}
@@ -478,6 +540,9 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     lineHeight: 16,
     marginTop: spacing.sm,
+  },
+  maskBarWrap: {
+    paddingHorizontal: spacing.lg,
   },
   listContent: {
     paddingHorizontal: spacing.lg,

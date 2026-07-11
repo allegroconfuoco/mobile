@@ -73,6 +73,7 @@ export type IconName =
   | 'timer'
   | 'history'
   | 'visibility_off'
+  | 'visibility'
   | 'share'
   | 'download'
   | 'logout';

@@ -29,12 +29,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BackButton } from '@/components/BackButton';
 import { Icon } from '@/components/Icon';
+import { MaskBar } from '@/components/MaskBar';
 import { showToast } from '@/components/Toast';
 import { SearchBar } from '@/components/SearchBar';
 import { TrackCover } from '@/components/TrackCover';
 import { useLibrary } from '@/library/LibraryProvider';
 import * as db from '@/library/db';
 import { artistOf, filterTracks, sortTracks } from '@/library/grouping';
+import { isMasked, loadMaskedArtists, maskSet, saveMaskedArtists } from '@/library/rewriteMasks';
 import type { LocalTrack } from '@/library/useAudioLibrary';
 import { alertPermissionNeeded, graveMany, type WriteSpec } from '@/library/writeTags';
 import { colors, fontFamily, radii, spacing, typography } from '@/theme';
@@ -50,9 +52,62 @@ export default function BulkSetArtistScreen() {
   const [writing, setWriting] = useState(false);
   const [progress, setProgress] = useState(0);
 
+  // Artistes masqués (« validés », cf. `rewriteMasks`) : leurs titres sont cachés de la liste pour
+  // ne pas re-vérifier les mêmes lignes à chaque passe. Persisté, partagé entre écrans.
+  const [masks, setMasks] = useState<string[]>(loadMaskedArtists);
+  const [showMasked, setShowMasked] = useState(false);
+  const maskLookup = useMemo(() => maskSet(masks), [masks]);
+
   // Liste triée par titre puis filtrée par la recherche (ordre stable pour parcourir/cocher).
   const sorted = useMemo(() => sortTracks(tracks, 'title'), [tracks]);
-  const visible = useMemo(() => filterTracks(sorted, query), [sorted, query]);
+  const matching = useMemo(() => filterTracks(sorted, query), [sorted, query]);
+  const maskedCount = useMemo(
+    () => matching.filter((t) => isMasked(maskLookup, artistOf(t))).length,
+    [matching, maskLookup]
+  );
+  const visible = useMemo(
+    () => (showMasked ? matching : matching.filter((t) => !isMasked(maskLookup, artistOf(t)))),
+    [matching, maskLookup, showMasked]
+  );
+
+  const addMask = (name: string) => {
+    if (isMasked(maskLookup, name)) {
+      return;
+    }
+    const next = [...masks, name];
+    setMasks(next);
+    saveMaskedArtists(next);
+    // Les pistes qui viennent d'être cachées sortent de la sélection : on ne grave pas l'invisible.
+    const lookup = maskSet(next);
+    setSelected((prev) => {
+      const kept = new Set<string>();
+      for (const id of prev) {
+        const t = tracksById.get(id);
+        if (t && !isMasked(lookup, artistOf(t))) {
+          kept.add(id);
+        }
+      }
+      return kept;
+    });
+    showToast(`« ${name} » masqué des réécritures`, 'visibility_off');
+  };
+
+  const removeMask = (name: string) => {
+    const next = masks.filter((m) => m !== name);
+    setMasks(next);
+    saveMaskedArtists(next);
+  };
+
+  const confirmMask = (name: string) => {
+    Alert.alert(
+      'Masquer cet artiste ?',
+      `Les titres de « ${name} » seront cachés des écrans de réécriture (associer un artiste, nettoyer les titres). Réversible d’un tap sur la puce.`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        { text: 'Masquer', onPress: () => addMask(name) },
+      ]
+    );
+  };
 
   // Toutes les pistes visibles sont-elles sélectionnées ? (pilote « Tout / Aucun »).
   const allVisibleSelected = visible.length > 0 && visible.every((t) => selected.has(t.id));
@@ -179,6 +234,14 @@ export default function BulkSetArtistScreen() {
 
         <SearchBar value={query} onChangeText={setQuery} placeholder="Filtrer les titres" />
 
+        <MaskBar
+          masks={masks}
+          maskedCount={maskedCount}
+          showMasked={showMasked}
+          onToggleShow={() => setShowMasked((v) => !v)}
+          onRemove={removeMask}
+        />
+
         {sorted.length === 0 ? (
           <View style={styles.centered}>
             <Icon name="music_off" size={40} color={colors.textMuted} />
@@ -192,15 +255,20 @@ export default function BulkSetArtistScreen() {
             keyboardDismissMode="on-drag"
             contentContainerStyle={styles.listContent}
             ListHeaderComponent={
-              <Pressable
-                onPress={toggleAllVisible}
-                style={({ pressed }) => [styles.selectAll, pressed && styles.pressed]}
-                accessibilityRole="button"
-              >
-                <Text style={styles.selectAllLabel}>
-                  {allVisibleSelected ? 'Tout désélectionner' : 'Tout sélectionner'}
+              <View>
+                <Pressable
+                  onPress={toggleAllVisible}
+                  style={({ pressed }) => [styles.selectAll, pressed && styles.pressed]}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.selectAllLabel}>
+                    {allVisibleSelected ? 'Tout désélectionner' : 'Tout sélectionner'}
+                  </Text>
+                </Pressable>
+                <Text style={styles.maskHint}>
+                  Appui long sur un titre pour masquer son artiste (validé) des réécritures.
                 </Text>
-              </Pressable>
+              </View>
             }
             ListEmptyComponent={<Text style={styles.empty}>Aucun résultat pour « {query} ».</Text>}
             renderItem={({ item }) => {
@@ -208,6 +276,7 @@ export default function BulkSetArtistScreen() {
               return (
                 <Pressable
                   onPress={() => toggle(item.id)}
+                  onLongPress={() => confirmMask(artistOf(item))}
                   style={({ pressed }) => [styles.row, pressed && styles.pressed]}
                   accessibilityRole="checkbox"
                   accessibilityState={{ checked: on }}
@@ -325,6 +394,13 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.semibold,
     fontSize: 12,
     color: colors.accentLabel,
+  },
+  maskHint: {
+    fontFamily: fontFamily.medium,
+    fontSize: 11.5,
+    color: colors.textMuted,
+    lineHeight: 16,
+    marginBottom: spacing.sm,
   },
   empty: {
     fontFamily: fontFamily.medium,

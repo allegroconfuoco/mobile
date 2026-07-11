@@ -30,6 +30,13 @@ import { SyncProvider } from '@/sync/SyncProvider';
 // Garde le splash affiché tant que les polices ET la session ne sont pas prêtes.
 SplashScreen.preventAutoHideAsync();
 
+// Ancre de la pile pour les deep links (ex. tap sur la notification média → `/now-playing`, cf.
+// `+native-intent.ts`) : au lancement à froid, `(tabs)` est monté SOUS l'écran ciblé, sinon le
+// modal Lecture serait seul dans la pile et « retour » sortirait de l'app.
+export const unstable_settings = {
+  initialRouteName: '(tabs)',
+};
+
 export default function RootLayout() {
   const [loaded, error] = useFonts({
     SchibstedGrotesk_400Regular,
