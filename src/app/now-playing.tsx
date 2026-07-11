@@ -229,34 +229,50 @@ export default function NowPlayingScreen() {
 
   // Barre de progression déplaçable : tap OU glissement (le knob suit le doigt, seek au lâcher).
   // `PanResponder` du cœur RN, comme la file (reanimated/gesture-handler non configurés, cf. CLAUDE.md).
+  // Seul le `locationX` du GRANT est lu (fiable : la barre est l'unique cible tactile, ses enfants
+  // sont en pointerEvents="none") ; pendant le geste on cumule `gestureState.dx` depuis cette
+  // fraction de départ — le `locationX` des move/release serait relatif à la vue touchée au départ,
+  // source du bug « seek au début » quand le doigt partait du knob (11 px de large → fraction ≈ 0).
   // `seekRef` n'est lue que dans les handlers de geste (jamais pendant le rendu) : la règle
   // react-hooks/refs donne un faux positif sur la capture par useMemo.
+  // Fraction au moment de la prise du geste, base du cumul de `dx` (ref : écrite/lue uniquement
+  // dans les handlers de geste, jamais pendant le rendu).
+  const grantFractionRef = useRef(0);
+
   /* eslint-disable react-hooks/refs */
-  const seekResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: () => true,
-        onPanResponderGrant: (e) => setScrubFraction(fractionAt(e.nativeEvent.locationX)),
-        onPanResponderMove: (e) => setScrubFraction(fractionAt(e.nativeEvent.locationX)),
-        onPanResponderRelease: (e) => {
-          const fraction = fractionAt(e.nativeEvent.locationX);
-          const { duration: dur, seekTo: seek, trackId } = seekRef.current;
-          if (dur > 0) {
-            // Affichage d'abord (la barre reste sur la cible), seek natif en fond.
-            const pending = { target: fraction * dur, trackId };
-            setPendingSeek(pending);
-            seek(fraction * dur);
-            // Filet de sécurité (seek natif jamais confirmé) : on relâche CETTE cible-là
-            // seulement (comparaison d'identité), un seek plus récent n'est pas touché.
-            setTimeout(() => setPendingSeek((p) => (p === pending ? null : p)), 3000);
-          }
-          setScrubFraction(null);
-        },
-        onPanResponderTerminate: () => setScrubFraction(null),
-      }),
-    []
-  );
+  const seekResponder = useMemo(() => {
+    const fractionDragged = (dx: number): number => {
+      const { barWidth: width } = seekRef.current;
+      if (width <= 0) {
+        return grantFractionRef.current;
+      }
+      return Math.min(1, Math.max(0, grantFractionRef.current + dx / width));
+    };
+    return PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (e) => {
+        grantFractionRef.current = fractionAt(e.nativeEvent.locationX);
+        setScrubFraction(grantFractionRef.current);
+      },
+      onPanResponderMove: (_e, g) => setScrubFraction(fractionDragged(g.dx)),
+      onPanResponderRelease: (_e, g) => {
+        const fraction = fractionDragged(g.dx);
+        const { duration: dur, seekTo: seek, trackId } = seekRef.current;
+        if (dur > 0) {
+          // Affichage d'abord (la barre reste sur la cible), seek natif en fond.
+          const pending = { target: fraction * dur, trackId };
+          setPendingSeek(pending);
+          seek(fraction * dur);
+          // Filet de sécurité (seek natif jamais confirmé) : on relâche CETTE cible-là
+          // seulement (comparaison d'identité), un seek plus récent n'est pas touché.
+          setTimeout(() => setPendingSeek((p) => (p === pending ? null : p)), 3000);
+        }
+        setScrubFraction(null);
+      },
+      onPanResponderTerminate: () => setScrubFraction(null),
+    });
+  }, []);
   /* eslint-enable react-hooks/refs */
 
   // La cible optimiste s'efface dès que la position réelle l'a rejointe (sondage 250 ms) ou si la
@@ -393,7 +409,10 @@ export default function NowPlayingScreen() {
           accessibilityRole="adjustable"
           accessibilityLabel="Position de lecture"
         >
-          <View style={styles.progressTrack}>
+          {/* pointerEvents="none" : la vue responder doit rester l'unique cible tactile, sinon un
+              toucher posé sur le knob/remplissage donne un locationX relatif à CET enfant (knob de
+              11 px → fraction ≈ 0 → seek au début de la piste). */}
+          <View style={styles.progressTrack} pointerEvents="none">
             <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
             <View
               style={[
