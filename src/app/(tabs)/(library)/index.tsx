@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter } from '@/lib/useRouter';
 
 import { colors, spacing, typography } from '@/theme';
 import { Icon, type IconName } from '@/components/Icon';

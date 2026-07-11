@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { useRouter } from 'expo-router';
+import { useRouter } from '@/lib/useRouter';
 
 import { TrackActionsSheet } from '@/components/TrackActionsSheet';
 import { PlaylistPickerSheet } from '@/components/PlaylistPickerSheet';

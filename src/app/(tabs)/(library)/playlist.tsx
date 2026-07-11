@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { useRouter } from '@/lib/useRouter';
 
 import { colors, radii, spacing, typography } from '@/theme';
 import { BackButton } from '@/components/BackButton';
@@ -198,12 +199,13 @@ export default function PlaylistScreen() {
           items={items}
           activeTrackId={activeSharedId}
           onPlay={playFrom}
-          onMove={(from, to) =>
-            reorderPlaylist(
-              id,
-              arrayMove(entries, from, to).map((e) => e.entry.sharedTrackId)
-            )
-          }
+          onMove={(from, to) => {
+            // Interface d'abord : la liste est déjà réordonnée de façon optimiste par
+            // DraggableTrackList ; l'écriture SQLite + le refresh (re-rendu complet de l'écran)
+            // sortent de la frame du lâcher du geste, sinon le relâchement « accroche ».
+            const order = arrayMove(entries, from, to).map((e) => e.entry.sharedTrackId);
+            setTimeout(() => reorderPlaylist(id, order), 0);
+          }}
           onRemove={(index) => removeTrackFromPlaylist(id, entries[index].entry.sharedTrackId)}
           // Appui long → menu d'actions, seulement pour une entrée résolue en fichier local
           // (les pistes indisponibles n'exposent déjà pas le geste, cf. DraggableTrackList).

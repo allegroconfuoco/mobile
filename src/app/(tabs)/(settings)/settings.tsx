@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { type Href, useRouter } from 'expo-router';
+import { type Href } from 'expo-router';
+import { useRouter } from '@/lib/useRouter';
 
 import { colors, radii, spacing, typography } from '@/theme';
 import { Icon, type IconName } from '@/components/Icon';

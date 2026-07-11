@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'expo-router';
+import { useRouter } from '@/lib/useRouter';
 import {
   Animated,
   type LayoutChangeEvent,
@@ -101,13 +101,21 @@ export default function NowPlayingScreen() {
   // on suit alors la position réelle du lecteur. Pendant le geste, on n'appelle `seekTo`
   // qu'au lâcher pour ne pas bombarder le lecteur de sauts à chaque frame.
   const [scrubFraction, setScrubFraction] = useState<number | null>(null);
+  // Cible affichée après le lâcher : le seek natif est asynchrone et `useProgress` sonde toutes
+  // les 250 ms, donc sans cela la barre « rebondissait » sur l'ancienne position pendant quelques
+  // ticks avant de sauter à la cible. On privilégie l'affichage : la barre reste sur la cible,
+  // le déplacement réel se fait en fond.
+  const [pendingSeek, setPendingSeek] = useState<{
+    target: number;
+    trackId: unknown;
+  } | null>(null);
 
   // Le PanResponder n'est créé qu'une fois ; il lit largeur/durée/callback via une ref mise à
   // jour hors rendu (effet), pour ne pas recréer le responder en plein geste et éviter des
   // closures périmées quand la piste (durée) change.
-  const seekRef = useRef({ barWidth, duration, seekTo });
+  const seekRef = useRef({ barWidth, duration, seekTo, trackId: track?.id as unknown });
   useEffect(() => {
-    seekRef.current = { barWidth, duration, seekTo };
+    seekRef.current = { barWidth, duration, seekTo, trackId: track?.id };
   });
 
   // Entrée de l'écran : léger fondu + montée (motion design, API Animated du cœur RN).
@@ -233,9 +241,15 @@ export default function NowPlayingScreen() {
         onPanResponderMove: (e) => setScrubFraction(fractionAt(e.nativeEvent.locationX)),
         onPanResponderRelease: (e) => {
           const fraction = fractionAt(e.nativeEvent.locationX);
-          const { duration: dur, seekTo: seek } = seekRef.current;
+          const { duration: dur, seekTo: seek, trackId } = seekRef.current;
           if (dur > 0) {
+            // Affichage d'abord (la barre reste sur la cible), seek natif en fond.
+            const pending = { target: fraction * dur, trackId };
+            setPendingSeek(pending);
             seek(fraction * dur);
+            // Filet de sécurité (seek natif jamais confirmé) : on relâche CETTE cible-là
+            // seulement (comparaison d'identité), un seek plus récent n'est pas touché.
+            setTimeout(() => setPendingSeek((p) => (p === pending ? null : p)), 3000);
           }
           setScrubFraction(null);
         },
@@ -245,11 +259,24 @@ export default function NowPlayingScreen() {
   );
   /* eslint-enable react-hooks/refs */
 
+  // La cible optimiste s'efface dès que la position réelle l'a rejointe (sondage 250 ms) ou si la
+  // piste change. Motif « ajuster l'état pendant le rendu » : chaque tick de progression re-rend,
+  // pas besoin de timer (le filet de sécurité 3 s est posé au lâcher, cf. le responder).
+  if (
+    pendingSeek !== null &&
+    (pendingSeek.trackId !== track?.id || Math.abs(position - pendingSeek.target) < 1.5)
+  ) {
+    setPendingSeek(null);
+  }
+
   const scrubbing = scrubFraction !== null;
   const liveProgress = duration > 0 ? Math.min(1, position / duration) : 0;
-  // Pendant un glissement, l'affichage suit le doigt ; sinon, la lecture réelle.
-  const progress = scrubFraction ?? liveProgress;
-  const displayPosition = scrubbing ? progress * duration : position;
+  const pendingFraction =
+    pendingSeek !== null && duration > 0 ? Math.min(1, pendingSeek.target / duration) : null;
+  // Pendant un glissement, l'affichage suit le doigt ; après le lâcher, la cible du seek ; sinon,
+  // la lecture réelle.
+  const progress = scrubFraction ?? pendingFraction ?? liveProgress;
+  const displayPosition = scrubbing || pendingFraction !== null ? progress * duration : position;
   const remaining = duration > 0 ? Math.max(0, duration - displayPosition) : 0;
   const title = track?.title ?? 'Aucune lecture';
   const artist = track?.artist ?? '—';

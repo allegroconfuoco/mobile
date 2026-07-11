@@ -1,7 +1,8 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, SectionList, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { useRouter } from '@/lib/useRouter';
 
 import { colors, radii, spacing, typography } from '@/theme';
 import { BackButton } from '@/components/BackButton';
