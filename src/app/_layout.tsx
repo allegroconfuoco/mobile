@@ -13,7 +13,7 @@ import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { colors } from '@/theme';
@@ -26,6 +26,8 @@ import { EnrichmentRunner } from '@/library/EnrichmentRunner';
 import { PlaylistsProvider } from '@/library/PlaylistsProvider';
 import { FavoritesProvider } from '@/library/FavoritesProvider';
 import { SyncProvider } from '@/sync/SyncProvider';
+import { useAppVersionCheck } from '@/update/useAppVersionCheck';
+import { UpdateModal } from '@/update/UpdateModal';
 
 // Garde le splash affiché tant que les polices ET la session ne sont pas prêtes.
 SplashScreen.preventAutoHideAsync();
@@ -85,6 +87,8 @@ export default function RootLayout() {
 function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
   const { status, isAuthenticated } = useAuth();
   const ready = fontsReady && status !== 'restoring';
+  const version = useAppVersionCheck();
+  const [updateDismissed, setUpdateDismissed] = useState(false);
 
   useEffect(() => {
     if (ready) {
@@ -100,29 +104,43 @@ function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
     return null;
   }
 
-  return (
-    <Stack
-      screenOptions={{
-        headerShown: false,
-        contentStyle: { backgroundColor: colors.background },
-      }}
-    >
-      {/* Écrans accessibles une fois connecté. Les écrans de détail (artiste, album, playlist,
-          favoris, réglages…) vivent désormais DANS les stacks d'onglet (cf. (tabs)/(library) et
-          (tabs)/(settings)) pour garder la tab bar + le mini-player visibles. Seuls restent au
-          niveau racine les modaux, qui doivent couvrir toute l'UI, barre comprise. */}
-      <Stack.Protected guard={isAuthenticated}>
-        <Stack.Screen name="(tabs)" />
-        {/* Écran Lecture présenté en modal, au-dessus de la tab bar. */}
-        <Stack.Screen name="now-playing" options={{ presentation: 'modal' }} />
-        {/* File d'attente, également en modal. */}
-        <Stack.Screen name="queue" options={{ presentation: 'modal' }} />
-      </Stack.Protected>
+  const showUpdateModal =
+    version.status === 'outdated-forced' ||
+    (version.status === 'outdated-suggested' && !updateDismissed);
 
-      {/* Porte d'entrée quand la session est absente. */}
-      <Stack.Protected guard={!isAuthenticated}>
-        <Stack.Screen name="login" />
-      </Stack.Protected>
-    </Stack>
+  return (
+    <>
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: colors.background },
+        }}
+      >
+        {/* Écrans accessibles une fois connecté. Les écrans de détail (artiste, album, playlist,
+            favoris, réglages…) vivent désormais DANS les stacks d'onglet (cf. (tabs)/(library) et
+            (tabs)/(settings)) pour garder la tab bar + le mini-player visibles. Seuls restent au
+            niveau racine les modaux, qui doivent couvrir toute l'UI, barre comprise. */}
+        <Stack.Protected guard={isAuthenticated}>
+          <Stack.Screen name="(tabs)" />
+          {/* Écran Lecture présenté en modal, au-dessus de la tab bar. */}
+          <Stack.Screen name="now-playing" options={{ presentation: 'modal' }} />
+          {/* File d'attente, également en modal. */}
+          <Stack.Screen name="queue" options={{ presentation: 'modal' }} />
+        </Stack.Protected>
+
+        {/* Porte d'entrée quand la session est absente. */}
+        <Stack.Protected guard={!isAuthenticated}>
+          <Stack.Screen name="login" />
+        </Stack.Protected>
+      </Stack>
+      <UpdateModal
+        visible={showUpdateModal}
+        forced={version.status === 'outdated-forced'}
+        currentVersion={version.currentVersion}
+        latestVersion={version.latestVersion}
+        downloadUrl={version.downloadUrl}
+        onDismiss={() => setUpdateDismissed(true)}
+      />
+    </>
   );
 }

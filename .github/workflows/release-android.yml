@@ -1,0 +1,139 @@
+name: Release Android
+
+# Build de l'APK Android et publication sur une release GitHub.
+#  - push d'un tag `vX.Y.Z` -> build release + publication publique (APK attachée)
+#  - lancement manuel       -> build de test, APK disponible en artifact (pas de release)
+#
+# Prérequis (une fois) :
+#  - secret ANDROID_RELEASE_KEYSTORE_BASE64 : keystore signé, généré avec l'alias/mot de passe
+#    attendus par android/app/build.gradle (signingConfigs.debug, cf. commentaire plus bas) :
+#      keytool -genkeypair -v -keystore release.keystore -alias androiddebugkey \
+#        -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android
+#      base64 -i release.keystore | gh secret set ANDROID_RELEASE_KEYSTORE_BASE64 --repo allegroconfuoco/mobile
+#    Sans ce secret, chaque run signe avec un keystore éphémère différent -> les utilisateurs
+#    devraient désinstaller l'appli à chaque mise à jour (Android refuse un APK re-signé).
+#  - variable de dépôt EXPO_PUBLIC_API_URL : URL publique du backend prod. Sans elle, l'APK
+#    publié garde le fallback dev (10.0.2.2, injoignable hors émulateur).
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build & publish APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # JDK 21 imposé (cf. .java-version) : le JDK par défaut casse le build natif.
+      - name: Setup JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      # Cache Gradle manuellement : android/ n'existe qu'après `expo prebuild`, donc le cache
+      # intégré de setup-java ne trouve rien au checkout. On clé sur le lockfile npm.
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="dev-${GITHUB_RUN_NUMBER}"
+          fi
+          echo "value=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Version: ${VERSION}"
+
+      - name: Configure API URL (prod)
+        env:
+          API_URL: ${{ vars.EXPO_PUBLIC_API_URL }}
+        run: |
+          if [ -n "${API_URL}" ]; then
+            echo "EXPO_PUBLIC_API_URL=${API_URL}" > .env
+          else
+            echo "::warning::EXPO_PUBLIC_API_URL non configurée (Settings > Secrets and variables > Actions > Variables) — l'APK garde le fallback dev, injoignable hors émulateur."
+          fi
+
+      - name: Prebuild (génère le projet android natif)
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Signature avec le keystore release du dépôt
+        # Le buildType `release` utilise signingConfigs.debug (storePassword/keyAlias/keyPassword
+        # = android/androiddebugkey/android, cf. android/app/build.gradle) : on remplace le
+        # debug.keystore généré au prebuild par le keystore persistant du secret, généré avec les
+        # mêmes identifiants — signature stable entre releases sans toucher au gradle.
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "${KEYSTORE_BASE64}" ]; then
+            echo "::warning::ANDROID_RELEASE_KEYSTORE_BASE64 absent — signature avec un keystore éphémère (mise à jour = désinstallation nécessaire)."
+          else
+            echo "${KEYSTORE_BASE64}" | base64 -d > android/app/debug.keystore
+          fi
+
+      - name: Injecte version & versionCode
+        run: |
+          sed -i -E "s/versionName \"[^\"]*\"/versionName \"${{ steps.version.outputs.value }}\"/" android/app/build.gradle
+          sed -i -E "s/versionCode [0-9]+/versionCode ${GITHUB_RUN_NUMBER}/" android/app/build.gradle
+          grep -E "versionName|versionCode" android/app/build.gradle
+
+      - name: Build release APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Prépare l'APK
+        # Nom d'asset FIXE (pas de suffixe de version) : le backend expose downloadUrl =
+        # .../releases/latest/download/fuoco.apk (cf. backend/.env, APP_VERSION_DOWNLOAD_URL),
+        # un lien stable qui pointe toujours la dernière release sans redéploiement backend.
+        run: |
+          mkdir -p dist
+          cp android/app/build/outputs/apk/release/app-release.apk dist/fuoco.apk
+
+      - name: Upload artifact (build de test)
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuoco-${{ steps.version.outputs.value }}
+          path: dist/fuoco.apk
+
+      - name: Publie la release GitHub
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Fuoco ${{ github.ref_name }}
+          generate_release_notes: true
+          append_body: true
+          body: |
+            ---
+            📲 **Installation** : téléchargez `fuoco.apk` ci-dessous sur votre téléphone Android, ouvrez-le, et autorisez l'installation depuis cette source si demandé.
+          files: dist/fuoco.apk
+          fail_on_unmatched_files: true
