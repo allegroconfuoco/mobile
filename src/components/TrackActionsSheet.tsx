@@ -22,6 +22,11 @@ export type TrackActionsSheetProps = {
   onToggleFavorite?: () => void;
   /** Ouvre le sélecteur de playlist pour y ajouter la piste. */
   onAddToPlaylist: () => void;
+  /**
+   * Entre en mode sélection multiple avec cette piste pré-cochée. Optionnel : seuls les écrans
+   * qui portent un mode sélection (vue Morceaux) fournissent ce handler.
+   */
+  onSelect?: () => void;
   /** Ouvre l'écran de correction des métadonnées (valider / corriger le match MusicBrainz). */
   onFixMetadata: () => void;
   /** Ouvre l'écran de rattachement de ce titre seul à un album (release MusicBrainz). */
@@ -52,6 +57,7 @@ export function TrackActionsSheet({
   onAddToQueue,
   onToggleFavorite,
   onAddToPlaylist,
+  onSelect,
   onFixMetadata,
   onLinkAlbum,
   onEditArtists,
@@ -88,6 +94,7 @@ export function TrackActionsSheet({
         label="Ajouter à une playlist"
         onPress={run(onAddToPlaylist)}
       />
+      {onSelect && <Action icon="checklist" label="Sélectionner" onPress={run(onSelect)} />}
       <Action icon="edit_note" label="Corriger les infos" onPress={run(onFixMetadata)} />
       <Action icon="travel_explore" label="Rattacher à un album" onPress={run(onLinkAlbum)} />
       {onEditArtists && (

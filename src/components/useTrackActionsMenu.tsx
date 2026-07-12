@@ -21,11 +21,15 @@ import { usePlayer } from '@/player/PlayerProvider';
  *
  * Tous les providers consommés (lecteur, favoris, bibliothèque) sont montés au-dessus des onglets,
  * donc le hook est utilisable depuis n'importe quel écran d'onglet.
+ *
+ * `onSelect` (optionnel) fait apparaître l'action « Sélectionner » : l'écran appelant entre alors
+ * en mode sélection multiple avec la piste du menu pré-cochée (vue Morceaux).
  */
-export function useTrackActionsMenu(): {
+export function useTrackActionsMenu(options?: { onSelect?: (track: LocalTrack) => void }): {
   open: (track: LocalTrack) => void;
   element: ReactNode;
 } {
+  const onSelect = options?.onSelect;
   const router = useRouter();
   const { setTrackExcluded, reloadTracks } = useLibrary();
   const { isFavorite, toggleFavorite } = useFavorites();
@@ -65,6 +69,7 @@ export function useTrackActionsMenu(): {
           }
         }}
         onAddToPlaylist={() => setPickerTrack(menuTrack)}
+        onSelect={onSelect ? () => menuTrack && onSelect(menuTrack) : undefined}
         onFixMetadata={() =>
           menuTrack && router.push({ pathname: '/metadata-fix', params: { trackId: menuTrack.id } })
         }

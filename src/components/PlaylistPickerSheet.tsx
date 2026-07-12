@@ -22,9 +22,11 @@ export type PlaylistPickerSheetProps = {
   /** Pistes à ajouter, ou `null` pour garder la feuille fermée. */
   tracks: LocalTrack[] | null;
   onClose: () => void;
+  /** Appelé après un ajout réussi (pas sur simple fermeture) — ex. sortir du mode sélection. */
+  onAdded?: () => void;
 };
 
-export function PlaylistPickerSheet({ tracks, onClose }: PlaylistPickerSheetProps) {
+export function PlaylistPickerSheet({ tracks, onClose, onAdded }: PlaylistPickerSheetProps) {
   const { playlists, createPlaylist, addTracksToPlaylist } = usePlaylistsContext();
   const [creating, setCreating] = useState(false);
 
@@ -43,6 +45,7 @@ export function PlaylistPickerSheet({ tracks, onClose }: PlaylistPickerSheetProp
           : `Ajouté à « ${playlistName} »`,
         'playlist_add_check'
       );
+      onAdded?.();
     }
     onClose();
   };
