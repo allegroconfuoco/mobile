@@ -365,6 +365,7 @@ function PlaylistsView({
             <>
               <Pressable
                 onPress={() => router.push('/favorites')}
+                android_ripple={{ color: colors.borderStrong }}
                 style={({ pressed }) => [styles.playlistRow, pressed && styles.rowPressed]}
                 accessibilityRole="button"
                 accessibilityLabel="Favoris"
@@ -395,6 +396,7 @@ function PlaylistsView({
         renderItem={({ item }) => (
           <Pressable
             onPress={() => router.push({ pathname: '/playlist', params: { id: item.id } })}
+            android_ripple={{ color: colors.borderStrong }}
             style={({ pressed }) => [styles.playlistRow, pressed && styles.rowPressed]}
             accessibilityRole="button"
             accessibilityLabel={`Playlist ${item.name}`}
@@ -646,6 +648,7 @@ const ArtistRow = memo(function ArtistRow({
   return (
     <Pressable
       onPress={() => onOpen(artist.name)}
+      android_ripple={{ color: colors.borderStrong }}
       style={({ pressed }) => [styles.artistRow, pressed && styles.rowPressed]}
       accessibilityRole="button"
       accessibilityLabel={`Artiste ${artist.name}`}

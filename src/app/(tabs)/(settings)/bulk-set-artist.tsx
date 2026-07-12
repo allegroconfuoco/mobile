@@ -253,6 +253,9 @@ export default function BulkSetArtistScreen() {
             keyExtractor={(t) => t.id}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
+            windowSize={7}
+            initialNumToRender={12}
+            maxToRenderPerBatch={16}
             contentContainerStyle={styles.listContent}
             ListHeaderComponent={
               <View>

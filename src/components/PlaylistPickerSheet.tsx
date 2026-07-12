@@ -65,6 +65,7 @@ export function PlaylistPickerSheet({ tracks, onClose, onAdded }: PlaylistPicker
 
         <Pressable
           onPress={() => setCreating(true)}
+          android_ripple={{ color: colors.borderStrong }}
           style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
           accessibilityRole="button"
           accessibilityLabel="Nouvelle playlist"
@@ -78,6 +79,7 @@ export function PlaylistPickerSheet({ tracks, onClose, onAdded }: PlaylistPicker
             <Pressable
               key={p.id}
               onPress={() => addTo(p.id, p.name)}
+              android_ripple={{ color: colors.borderStrong }}
               style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
               accessibilityRole="button"
               accessibilityLabel={`Ajouter à ${p.name}`}

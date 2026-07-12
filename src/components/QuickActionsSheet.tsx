@@ -39,6 +39,7 @@ export function QuickActionsSheet({ visible, title, actions, onClose }: QuickAct
             onClose();
             action.onPress();
           }}
+          android_ripple={{ color: colors.borderStrong }}
           style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
           accessibilityRole="button"
           accessibilityLabel={action.label}

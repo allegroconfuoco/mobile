@@ -176,6 +176,7 @@ function Action({
   return (
     <Pressable
       onPress={onPress}
+      android_ripple={{ color: colors.borderStrong }}
       style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}
       accessibilityRole="button"
       accessibilityLabel={label}

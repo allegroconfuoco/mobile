@@ -76,6 +76,8 @@ export const TrackRow = memo(function TrackRow({
       onPress={onPress}
       onLongPress={selectionMode ? undefined : onLongPress}
       delayLongPress={300}
+      // Ripple natif : feedback dès le touch-down (zéro JS), en plus du fond `pressed`.
+      android_ripple={{ color: colors.borderStrong }}
       style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
       accessibilityRole={selectionMode ? 'checkbox' : 'button'}
       accessibilityState={

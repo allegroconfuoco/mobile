@@ -179,6 +179,9 @@ export default function BulkDissociateAlbumsScreen() {
           data={visible}
           keyExtractor={(a) => a.key}
           keyboardShouldPersistTaps="handled"
+          windowSize={7}
+          initialNumToRender={12}
+          maxToRenderPerBatch={16}
           contentContainerStyle={styles.listContent}
           ListHeaderComponent={
             <Pressable
