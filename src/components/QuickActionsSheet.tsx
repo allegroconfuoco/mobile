@@ -43,7 +43,9 @@ export function QuickActionsSheet({ visible, title, actions, onClose }: QuickAct
           accessibilityRole="button"
           accessibilityLabel={action.label}
         >
-          <Icon name={action.icon} size={22} color={colors.textSecondary} />
+          {/* Mêmes couleur d'icône et hauteur de ligne que TrackActionsSheet : les deux feuilles
+              doivent être indiscernables à l'œil (passe UX), seules leurs APIs diffèrent. */}
+          <Icon name={action.icon} size={22} color={colors.accentIcon} />
           <Text style={styles.rowLabel}>{action.label}</Text>
         </Pressable>
       ))}
@@ -63,7 +65,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.lg,
     paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.lg,
     borderRadius: radii.sm,
   },
   rowPressed: {

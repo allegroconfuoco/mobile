@@ -143,7 +143,18 @@ export default function MetadataFixScreen() {
         >
           <Icon name="arrow_back" size={26} color={colors.textPrimary} />
         </Pressable>
-        <Text style={styles.title}>Corriger les infos</Text>
+        {/* Sous-titre contextuel (passe UX) : ces écrans s'empilent profond, dire sur QUOI on
+            travaille évite de se perdre dans le flux métadonnées. */}
+        <View style={styles.headerText}>
+          <Text style={styles.title} numberOfLines={1}>
+            Corriger les infos
+          </Text>
+          {track && (
+            <Text style={styles.headerSubtitle} numberOfLines={1}>
+              {[track.title, track.artist].filter(Boolean).join(' · ')}
+            </Text>
+          )}
+        </View>
       </View>
 
       {!track ? (
@@ -351,8 +362,17 @@ const styles = StyleSheet.create({
   },
   title: {
     ...typography.title,
+    minWidth: 0,
+  },
+  headerText: {
     flex: 1,
     minWidth: 0,
+  },
+  headerSubtitle: {
+    ...typography.body,
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
   },
   centered: {
     flex: 1,

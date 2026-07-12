@@ -128,9 +128,16 @@ export function MiniPlayer() {
     >
       <Pressable
         onPress={() => router.push('/now-playing')}
+        // Appui long = file d'attente (le tap et les swipes sont déjà pris) : la file devient
+        // accessible sans passer par l'écran Lecture.
+        onLongPress={() => {
+          tapLight();
+          router.push('/queue');
+        }}
+        delayLongPress={300}
         style={styles.container}
         accessibilityRole="button"
-        accessibilityLabel={`Ouvrir la lecture en cours : ${title}, ${artist}. Glissez horizontalement pour changer de piste, vers le haut pour ouvrir la lecture.`}
+        accessibilityLabel={`Ouvrir la lecture en cours : ${title}, ${artist}. Glissez horizontalement pour changer de piste, vers le haut pour ouvrir la lecture. Appui long pour la file d'attente.`}
       >
         <MiniProgressBar />
 

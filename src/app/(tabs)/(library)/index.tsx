@@ -173,7 +173,17 @@ function LibraryContent({
   const { tracks, artists, albums, trackSort, setTrackSort, refreshing, rescan } = library;
   const router = useRouter();
   const { playQueue, playNext, addToQueue } = usePlayer();
+  const { status: syncStatus, syncNow } = useSync();
   const activeTrack = useActiveTrack();
+
+  // Pull-to-refresh unifié (passe UX) : le même geste voulait dire « re-scanner les fichiers »
+  // sur Morceaux/Artistes/Albums mais « synchroniser » sur Playlists — sémantique invisible.
+  // Désormais tirer = tout rafraîchir (re-scan incrémental + synchro), partout.
+  const refreshAll = useCallback(() => {
+    rescan();
+    void syncNow();
+  }, [rescan, syncNow]);
+  const pulling = refreshing || syncStatus === 'syncing';
 
   // Mode sélection multiple (vue Morceaux) : `null` = mode normal. Entré via l'action
   // « Sélectionner » du menu long-press, sorti par « Annuler » ou après une action réussie.
@@ -272,8 +282,8 @@ function LibraryContent({
           onToggleSort={() => setTrackSort(nextSort(trackSort))}
           onPlay={playFromFiltered}
           onLongPress={trackMenu.open}
-          refreshing={refreshing}
-          onRefresh={rescan}
+          refreshing={pulling}
+          onRefresh={refreshAll}
           selection={selection}
           onToggleSelect={toggleSelect}
           onSelectionChange={setSelection}
@@ -288,8 +298,8 @@ function LibraryContent({
           artists={filteredArtists}
           query={query}
           onOpen={openArtist}
-          refreshing={refreshing}
-          onRefresh={rescan}
+          refreshing={pulling}
+          onRefresh={refreshAll}
         />
       )}
       {view === 'albums' && (
@@ -297,11 +307,13 @@ function LibraryContent({
           albums={filteredAlbums}
           query={query}
           onOpen={openAlbum}
-          refreshing={refreshing}
-          onRefresh={rescan}
+          refreshing={pulling}
+          onRefresh={refreshAll}
         />
       )}
-      {view === 'playlists' && <PlaylistsView query={query} />}
+      {view === 'playlists' && (
+        <PlaylistsView query={query} refreshing={pulling} onRefresh={refreshAll} />
+      )}
 
       {trackMenu.element}
 
@@ -317,12 +329,18 @@ function LibraryContent({
 }
 
 /** Vue Playlists : accès Favoris + liste des playlists (filtrable par nom) + création. */
-function PlaylistsView({ query }: { query: string }) {
+function PlaylistsView({
+  query,
+  refreshing,
+  onRefresh,
+}: {
+  query: string;
+  refreshing: boolean;
+  onRefresh: () => void;
+}) {
   const router = useRouter();
   const { playlists, createPlaylist } = usePlaylistsContext();
   const { favoriteIds } = useFavorites();
-  // Ici, tirer pour rafraîchir = synchroniser les playlists (pas re-scanner les fichiers).
-  const { status: syncStatus, syncNow } = useSync();
   const [creating, setCreating] = useState(false);
 
   // Filtre sur le nom (même repli d'accents que le reste de la recherche).
@@ -340,7 +358,7 @@ function PlaylistsView({ query }: { query: string }) {
       <FlatList
         data={filtered}
         keyExtractor={(playlist) => playlist.id}
-        refreshControl={themedRefresh(syncStatus === 'syncing', () => void syncNow())}
+        refreshControl={themedRefresh(refreshing, onRefresh)}
         // Pendant une recherche, on masque Favoris + création pour ne montrer que les résultats.
         ListHeaderComponent={
           isSearching ? null : (

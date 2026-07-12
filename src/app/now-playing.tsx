@@ -618,6 +618,9 @@ export default function NowPlayingScreen() {
         onLinkAlbum={() =>
           local && router.push({ pathname: '/identify-album', params: { trackId: local.id } })
         }
+        onEditArtists={() =>
+          local && router.push({ pathname: '/edit-artists', params: { trackId: local.id } })
+        }
         onWriteToFile={() =>
           local && router.push({ pathname: '/write-tags', params: { trackId: local.id } })
         }

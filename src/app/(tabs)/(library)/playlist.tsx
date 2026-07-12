@@ -11,6 +11,7 @@ import { showToast } from '@/components/Toast';
 import { tapMedium } from '@/lib/haptics';
 import { DraggableTrackList, type DraggableTrackItem } from '@/components/DraggableTrackList';
 import { PlaylistNameDialog } from '@/components/PlaylistNameDialog';
+import { QuickActionsSheet } from '@/components/QuickActionsSheet';
 import { useTrackActionsMenu } from '@/components/useTrackActionsMenu';
 import { UNKNOWN_ARTIST } from '@/library/grouping';
 import { useLibrary } from '@/library/LibraryProvider';
@@ -57,6 +58,7 @@ export default function PlaylistScreen() {
   const trackMenu = useTrackActionsMenu();
 
   const [renaming, setRenaming] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const playlist = playlists.find((p) => p.id === id);
   const name = playlist?.name ?? 'Playlist';
@@ -129,37 +131,26 @@ export default function PlaylistScreen() {
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + spacing.sm }]}>
+      {/* Même motif d'en-tête que album/artiste (passe UX) : action primaire + un « … » qui
+          regroupe le reste dans une QuickActionsSheet, au lieu d'une rangée d'icônes. */}
       <View style={styles.topBar}>
         <BackButton onPress={() => router.back()} />
         <View style={styles.topActions}>
           <Pressable
-            onPress={() =>
-              router.push({
-                pathname: '/write-tags',
-                params: { scope: 'playlist', playlistId: id, label: name },
-              })
-            }
+            onPress={() => router.push({ pathname: '/playlist-add', params: { id } })}
             hitSlop={12}
             accessibilityRole="button"
-            accessibilityLabel="Écrire les titres de la playlist dans les fichiers"
+            accessibilityLabel="Ajouter des titres"
           >
-            <Icon name="save" size={24} color={colors.textPrimary} />
+            <Icon name="add" size={26} color={colors.textPrimary} />
           </Pressable>
           <Pressable
-            onPress={() => setRenaming(true)}
+            onPress={() => setMenuOpen(true)}
             hitSlop={12}
             accessibilityRole="button"
-            accessibilityLabel="Renommer la playlist"
+            accessibilityLabel="Plus d’actions"
           >
-            <Icon name="edit" size={24} color={colors.textPrimary} />
-          </Pressable>
-          <Pressable
-            onPress={confirmDelete}
-            hitSlop={12}
-            accessibilityRole="button"
-            accessibilityLabel="Supprimer la playlist"
-          >
-            <Icon name="delete" size={24} color={colors.textPrimary} />
+            <Icon name="more_horiz" size={26} color={colors.textPrimary} />
           </Pressable>
         </View>
       </View>
@@ -234,6 +225,26 @@ export default function PlaylistScreen() {
         submitLabel="Renommer"
         onSubmit={(newName) => renamePlaylist(id, newName)}
         onClose={() => setRenaming(false)}
+      />
+
+      <QuickActionsSheet
+        visible={menuOpen}
+        title={name}
+        onClose={() => setMenuOpen(false)}
+        actions={[
+          { icon: 'edit', label: 'Renommer', onPress: () => setRenaming(true) },
+          {
+            icon: 'save',
+            label: 'Écrire les tags dans les fichiers',
+            onPress: () =>
+              router.push({
+                pathname: '/write-tags',
+                params: { scope: 'playlist', playlistId: id, label: name },
+              }),
+          },
+          // Destructive en dernier, comme sur les autres écrans.
+          { icon: 'delete', label: 'Supprimer la playlist', onPress: confirmDelete },
+        ]}
       />
 
       {trackMenu.element}

@@ -14,6 +14,7 @@ import { useLibrary } from '@/library/LibraryProvider';
 import { useFavorites } from '@/library/FavoritesProvider';
 import { usePlayer } from '@/player/PlayerProvider';
 import { useActiveTrack } from '@/player/usePlayback';
+import { useSync } from '@/sync/SyncProvider';
 
 /** Écran Favoris : les morceaux likés, jouables comme une file. */
 export default function FavoritesScreen() {
@@ -22,8 +23,16 @@ export default function FavoritesScreen() {
   const { tracksById, refreshing, rescan } = useLibrary();
   const { favoriteIds } = useFavorites();
   const { playQueue } = usePlayer();
+  const { status: syncStatus, syncNow } = useSync();
   const activeTrack = useActiveTrack();
   const trackMenu = useTrackActionsMenu();
+
+  // Pull-to-refresh unifié (passe UX) : tirer = re-scan incrémental + synchro, comme partout.
+  const refreshAll = useCallback(() => {
+    rescan();
+    void syncNow();
+  }, [rescan, syncNow]);
+  const pulling = refreshing || syncStatus === 'syncing';
 
   // Résout les ids favoris en pistes locales, dans l'ordre du `Set` (récent d'abord au démarrage) ;
   // les favoris dont le fichier a disparu de l'appareil sont simplement omis.
@@ -50,7 +59,11 @@ export default function FavoritesScreen() {
 
       <View style={styles.header}>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={styles.eyebrow}>Favoris</Text>
+          {/* Cœur plein : la même identité visuelle que la rangée Favoris de la vue Playlists. */}
+          <View style={styles.eyebrowRow}>
+            <Icon name="favorite" filled size={14} color={colors.accent} />
+            <Text style={styles.eyebrow}>Favoris</Text>
+          </View>
           <Text style={styles.title} numberOfLines={2}>
             Morceaux likés
           </Text>
@@ -80,8 +93,8 @@ export default function FavoritesScreen() {
         maxToRenderPerBatch={16}
         refreshControl={
           <RefreshControl
-            refreshing={refreshing}
-            onRefresh={rescan}
+            refreshing={pulling}
+            onRefresh={refreshAll}
             tintColor={colors.accent}
             colors={[colors.accent]}
             progressBackgroundColor={colors.surface}
@@ -125,6 +138,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xxl,
     paddingTop: spacing.sm,
     paddingBottom: spacing.lg,
+  },
+  eyebrowRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
   },
   eyebrow: {
     ...typography.label,
