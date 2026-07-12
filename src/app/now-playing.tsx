@@ -626,7 +626,10 @@ export default function NowPlayingScreen() {
         onExclude={() => local && setTrackExcluded(local.id, true)}
       />
 
-      <PlaylistPickerSheet track={pickerOpen ? local : null} onClose={() => setPickerOpen(false)} />
+      <PlaylistPickerSheet
+        tracks={pickerOpen && local ? [local] : null}
+        onClose={() => setPickerOpen(false)}
+      />
 
       {/* Modal natif : le host racine ne passe pas au-dessus, on monte le nôtre (cf. Toast.tsx). */}
       <ToastHost variant="modal" />

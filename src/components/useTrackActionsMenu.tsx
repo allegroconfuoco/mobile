@@ -88,7 +88,10 @@ export function useTrackActionsMenu(): {
         }}
       />
 
-      <PlaylistPickerSheet track={pickerTrack} onClose={() => setPickerTrack(null)} />
+      <PlaylistPickerSheet
+        tracks={pickerTrack ? [pickerTrack] : null}
+        onClose={() => setPickerTrack(null)}
+      />
     </>
   );
 

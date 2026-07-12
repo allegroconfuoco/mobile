@@ -190,9 +190,16 @@ export default function PlaylistScreen() {
       {count === 0 ? (
         <View style={styles.centered}>
           <Icon name="queue_music" size={40} color={colors.textMuted} />
-          <Text style={styles.emptyText}>
-            Playlist vide. Ajoutez des morceaux depuis la bibliothèque (appui long sur une piste).
-          </Text>
+          <Text style={styles.emptyText}>Playlist vide.</Text>
+          <Pressable
+            onPress={() => router.push({ pathname: '/playlist-add', params: { id } })}
+            style={({ pressed }) => [styles.emptyAddButton, pressed && styles.emptyAddPressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Ajouter des titres"
+          >
+            <Icon name="add" size={20} color={colors.onAccent} />
+            <Text style={styles.emptyAddLabel}>Ajouter des titres</Text>
+          </Pressable>
         </View>
       ) : (
         <DraggableTrackList
@@ -295,5 +302,22 @@ const styles = StyleSheet.create({
   emptyText: {
     ...typography.body,
     textAlign: 'center',
+  },
+  emptyAddButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.accent,
+    borderRadius: radii.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xl,
+  },
+  emptyAddPressed: {
+    opacity: 0.7,
+  },
+  emptyAddLabel: {
+    ...typography.heading,
+    fontSize: 15,
+    color: colors.onAccent,
   },
 });
