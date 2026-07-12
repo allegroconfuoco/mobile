@@ -162,8 +162,21 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       return;
     }
     const tracks = TrackPlayer.getQueue();
-    const activeIndex = TrackPlayer.getActiveMediaItemIndex();
-    setQueue({ tracks, activeIndex: activeIndex ?? undefined });
+    const activeIndex = TrackPlayer.getActiveMediaItemIndex() ?? undefined;
+    setQueue((prev) => {
+      // Bail-out d'identité : `PlaybackStateChanged` (play/pause/buffer) rappelle ce refresh en
+      // continu pendant la lecture ; sans comparaison, chaque appel posait un nouveau tableau et
+      // re-rendait tous les consommateurs `useQueue` (et re-déclenchait la resync de la liste
+      // réordonnable). Même séquence de `mediaId` + même piste active = snapshot inchangé.
+      if (
+        prev.activeIndex === activeIndex &&
+        prev.tracks.length === tracks.length &&
+        prev.tracks.every((t, i) => t.mediaId === tracks[i].mediaId)
+      ) {
+        return prev;
+      }
+      return { tracks, activeIndex };
+    });
   }, []);
 
   useEffect(() => {
