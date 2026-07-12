@@ -1,5 +1,14 @@
 import { useCallback, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import {
+  Alert,
+  InteractionManager,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import { useRouter } from '@/lib/useRouter';
@@ -120,18 +129,31 @@ export default function StatsScreen() {
 
   const [period, setPeriod] = useState<StatsPeriod>('4w');
   const [data, setData] = useState<Dashboard>(() => loadDashboard('4w'));
+  // Version des écoutes au moment du calcul : si rien n'a bougé, le dashboard affiché est juste.
+  const [computedAt, setComputedAt] = useState(() => db.getPlayEventsVersion());
   const [incognito, setIncognito] = useState(() => isIncognitoEnabled());
 
-  // Recalcule à chaque retour sur l'onglet (les écoutes s'accumulent pendant qu'on navigue)
-  // et à chaque changement de période. Les agrégats SQL sont bon marché à cette échelle.
+  // Au retour sur l'onglet, on ne recalcule les ~10 agrégats SQL que si `play_events` a bougé
+  // (compteur de version, cf. db.ts) — sinon l'onglet se focalise sans aucun travail. Et quand il
+  // faut recalculer, l'ancien dashboard reste affiché pendant que le recalcul part **après** la
+  // transition (stale-while-revalidate) : le changement d'onglet se peint d'abord.
   useFocusEffect(
     useCallback(() => {
-      setData(loadDashboard(period));
-    }, [period])
+      if (db.getPlayEventsVersion() === computedAt) {
+        return;
+      }
+      const task = InteractionManager.runAfterInteractions(() => {
+        setComputedAt(db.getPlayEventsVersion());
+        setData(loadDashboard(period));
+      });
+      return () => task.cancel();
+    }, [period, computedAt])
   );
 
+  // Changement de période : action utilisateur explicite, recalcul synchrone immédiat.
   const changePeriod = (next: StatsPeriod) => {
     setPeriod(next);
+    setComputedAt(db.getPlayEventsVersion());
     setData(loadDashboard(next));
   };
 
