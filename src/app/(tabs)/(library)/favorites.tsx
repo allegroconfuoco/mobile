@@ -13,7 +13,7 @@ import type { LocalTrack } from '@/library/useAudioLibrary';
 import { useLibrary } from '@/library/LibraryProvider';
 import { useFavorites } from '@/library/FavoritesProvider';
 import { usePlayer } from '@/player/PlayerProvider';
-import { usePlayback } from '@/player/usePlayback';
+import { useActiveTrack } from '@/player/usePlayback';
 
 /** Écran Favoris : les morceaux likés, jouables comme une file. */
 export default function FavoritesScreen() {
@@ -22,7 +22,7 @@ export default function FavoritesScreen() {
   const { tracksById, refreshing, rescan } = useLibrary();
   const { favoriteIds } = useFavorites();
   const { playQueue } = usePlayer();
-  const { track: activeTrack } = usePlayback();
+  const activeTrack = useActiveTrack();
   const trackMenu = useTrackActionsMenu();
 
   // Résout les ids favoris en pistes locales, dans l'ordre du `Set` (récent d'abord au démarrage) ;

@@ -7,8 +7,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { colors, coverFallback, coverGradient, radii, spacing, typography } from '@/theme';
 import { Icon } from '@/components/Icon';
 import { PressableScale } from '@/components/PressableScale';
+import { useIsPlaying, useProgress } from '@rntp/player';
+
 import { usePlayer } from '@/player/PlayerProvider';
-import { usePlayback } from '@/player/usePlayback';
+import { useActiveTrack } from '@/player/usePlayback';
 import { tapLight } from '@/lib/haptics';
 
 // Seuils de geste (px). Au-delà, on déclenche l'action ; en-deçà, retour à la position de repos.
@@ -24,7 +26,10 @@ const OPEN_DISTANCE = 36; // vertical vers le haut → ouvre la lecture
  */
 export function MiniPlayer() {
   const router = useRouter();
-  const { track, isPlaying, position, duration } = usePlayback();
+  // Pas de `usePlayback` ici : son `useProgress` re-rendrait toute la barre (titre, pochette,
+  // contrôles) 4×/s. La progression vit dans `MiniProgressBar`, seul composant qui sonde.
+  const track = useActiveTrack();
+  const isPlaying = useIsPlaying();
   const { togglePlayPause, skipToNext, skipToPrevious } = usePlayer();
 
   // Entrée : montée + fondu au montage (quand une première piste devient disponible).
@@ -107,7 +112,6 @@ export function MiniPlayer() {
     return null;
   }
 
-  const progress = duration > 0 ? Math.min(1, position / duration) : 0;
   const title = track.title ?? 'Titre inconnu';
   const artist = track.artist ?? 'Artiste inconnu';
 
@@ -128,10 +132,7 @@ export function MiniPlayer() {
         accessibilityRole="button"
         accessibilityLabel={`Ouvrir la lecture en cours : ${title}, ${artist}. Glissez horizontalement pour changer de piste, vers le haut pour ouvrir la lecture.`}
       >
-        {/* Barre de progression fine (Forge : à plat, pleine largeur). */}
-        <View style={styles.progressTrack}>
-          <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
-        </View>
+        <MiniProgressBar />
 
         <View style={styles.row}>
           <Cover
@@ -160,6 +161,21 @@ export function MiniPlayer() {
         </View>
       </Pressable>
     </Animated.View>
+  );
+}
+
+/**
+ * Barre de progression fine (Forge : à plat, pleine largeur), isolée : seul composant du
+ * mini-player à sonder la position (`useProgress` re-rend à chaque tick de 250 ms, même en pause).
+ */
+function MiniProgressBar() {
+  const { position, duration } = useProgress(0.25);
+  const progress = duration > 0 ? Math.min(1, position / duration) : 0;
+
+  return (
+    <View style={styles.progressTrack}>
+      <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
+    </View>
   );
 }
 

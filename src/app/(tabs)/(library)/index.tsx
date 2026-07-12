@@ -36,7 +36,7 @@ import { usePlaylistsContext } from '@/library/PlaylistsProvider';
 import { useFavorites } from '@/library/FavoritesProvider';
 import { useSync } from '@/sync/SyncProvider';
 import { usePlayer } from '@/player/PlayerProvider';
-import { usePlayback } from '@/player/usePlayback';
+import { useActiveTrack } from '@/player/usePlayback';
 
 /** Vue courante de la bibliothèque. */
 type LibraryView = 'tracks' | 'artists' | 'albums' | 'playlists';
@@ -170,7 +170,7 @@ function LibraryContent({
   const { tracks, artists, albums, trackSort, setTrackSort, refreshing, rescan } = library;
   const router = useRouter();
   const { playQueue } = usePlayer();
-  const { track: activeTrack } = usePlayback();
+  const activeTrack = useActiveTrack();
   // Menu d'actions (long-press) mutualisé : ouverture + feuilles rendues via `trackMenu.element`.
   const trackMenu = useTrackActionsMenu();
 

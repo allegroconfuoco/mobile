@@ -19,7 +19,7 @@ import {
 } from '@/library/grouping';
 import { useLibrary } from '@/library/LibraryProvider';
 import { usePlayer } from '@/player/PlayerProvider';
-import { usePlayback } from '@/player/usePlayback';
+import { useActiveTrack } from '@/player/usePlayback';
 
 /**
  * Détail d'un artiste (issue #12) : ses morceaux regroupés par album.
@@ -36,7 +36,7 @@ export default function ArtistScreen() {
 
   const { tracks } = useLibrary();
   const { playQueue } = usePlayer();
-  const { track: activeTrack } = usePlayback();
+  const activeTrack = useActiveTrack();
   const trackMenu = useTrackActionsMenu();
 
   // Sections (un album = une section) + file de lecture à plat, dérivées ensemble.

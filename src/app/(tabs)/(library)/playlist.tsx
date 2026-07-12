@@ -17,7 +17,7 @@ import { useLibrary } from '@/library/LibraryProvider';
 import { usePlaylistsContext } from '@/library/PlaylistsProvider';
 import type { LocalTrack } from '@/library/useAudioLibrary';
 import { usePlayer } from '@/player/PlayerProvider';
-import { usePlayback } from '@/player/usePlayback';
+import { useActiveTrack } from '@/player/usePlayback';
 
 function arrayMove<T>(list: T[], from: number, to: number): T[] {
   const next = list.slice();
@@ -53,7 +53,7 @@ export default function PlaylistScreen() {
     deletePlaylist,
   } = usePlaylistsContext();
   const { playQueue } = usePlayer();
-  const { track: activeTrack } = usePlayback();
+  const activeTrack = useActiveTrack();
   const trackMenu = useTrackActionsMenu();
 
   const [renaming, setRenaming] = useState(false);

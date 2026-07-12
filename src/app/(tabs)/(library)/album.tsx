@@ -22,7 +22,7 @@ import {
 import * as db from '@/library/db';
 import { useLibrary } from '@/library/LibraryProvider';
 import { usePlayer } from '@/player/PlayerProvider';
-import { usePlayback } from '@/player/usePlayback';
+import { useActiveTrack } from '@/player/usePlayback';
 
 /**
  * Détail d'un album (issue #13) : ses pistes dans l'ordre (disque, puis n° de piste, puis titre).
@@ -41,7 +41,7 @@ export default function AlbumScreen() {
 
   const { tracks } = useLibrary();
   const { playQueue } = usePlayer();
-  const { track: activeTrack } = usePlayback();
+  const activeTrack = useActiveTrack();
   const trackMenu = useTrackActionsMenu();
 
   // Pistes locales, sections (locaux + fantômes) et index de lecture, dérivés ensemble. Si l'album

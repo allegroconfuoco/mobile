@@ -24,8 +24,7 @@ export type PlaybackState = {
  * s'auto-corrigent (lecture native synchrone + resync au retour au premier plan).
  */
 export function usePlayback(): PlaybackState {
-  const { tracks, activeIndex } = useQueue();
-  const track = activeIndex != null ? tracks[activeIndex] : undefined;
+  const track = useActiveTrack();
   const playing = useIsPlaying();
   const { position, duration } = useProgress(0.25);
 
@@ -35,4 +34,17 @@ export function usePlayback(): PlaybackState {
     position,
     duration,
   };
+}
+
+/**
+ * Piste active seule, sans position ni état de lecture.
+ *
+ * À préférer à `usePlayback` partout où seul l'id actif compte (surlignage de la ligne en cours
+ * dans les listes) : `useProgress` pose un **nouvel objet d'état à chaque tick de 250 ms, même en
+ * pause**, donc chaque consommateur de `usePlayback` re-rend 4×/s en continu. Ce hook ne re-rend
+ * que quand le snapshot de la file change réellement (changement de piste, mutation de file).
+ */
+export function useActiveTrack(): MediaItem | undefined {
+  const { tracks, activeIndex } = useQueue();
+  return activeIndex != null ? tracks[activeIndex] : undefined;
 }
