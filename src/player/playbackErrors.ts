@@ -1,8 +1,8 @@
 /**
- * Relais des erreurs de lecture entre le service RNTP (qui les reçoit, y compris en
- * arrière-plan) et l'UI (qui ne peut les montrer qu'au premier plan). Le service et l'app
- * partagent le même runtime JS, un état de module suffit : le service pousse, l'UI s'abonne
- * et affiche un toast quand elle est là.
+ * Relais des erreurs de lecture entre le dispatch des événements lecteur (`playerEvents.ts`,
+ * qui les reçoit y compris en arrière-plan via le handler headless) et l'UI (qui ne peut les
+ * montrer qu'au premier plan). Les deux partagent le même runtime JS, un état de module
+ * suffit : le dispatch pousse, l'UI s'abonne et affiche un toast quand elle est là.
  */
 
 export type PlaybackErrorInfo = {

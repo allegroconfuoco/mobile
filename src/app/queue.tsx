@@ -44,14 +44,14 @@ export default function QueueScreen() {
   const count = tracks.length;
   const subtitle = count === 0 ? 'File vide' : `${count} ${count > 1 ? 'titres' : 'titre'} en file`;
 
-  // Projette les pistes RNTP vers la forme normalisée de la liste réordonnable.
+  // Projette les `MediaItem` du lecteur vers la forme normalisée de la liste réordonnable.
   const items = useMemo<DraggableTrackItem[]>(
     () =>
       tracks.map((t) => ({
-        id: t.id ?? '',
+        id: t.mediaId ?? '',
         title: t.title ?? 'Titre inconnu',
         artist: t.artist ?? 'Artiste inconnu',
-        artworkUri: typeof t.artwork === 'string' ? t.artwork : null,
+        artworkUri: typeof t.artworkUrl === 'string' ? t.artworkUrl : null,
       })),
     [tracks]
   );
@@ -95,7 +95,7 @@ export default function QueueScreen() {
       ) : (
         <DraggableTrackList
           items={items}
-          activeTrackId={activeTrack?.id}
+          activeTrackId={activeTrack?.mediaId}
           onPlay={(index) => void skipToIndex(index)}
           onMove={(from, to) => void moveInQueue(from, to)}
           onRemove={(index) => void removeFromQueue(index)}

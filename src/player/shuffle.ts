@@ -1,10 +1,12 @@
 /**
  * Helpers purs pour le shuffle de la file (finition Phase 1).
  *
- * react-native-track-player n'a **pas** de shuffle natif : on réordonne la file nous-mêmes par une
- * suite de `move(from, to)`. Ces fonctions ne touchent à rien (pas d'IO, pas de RNTP) — elles
- * calculent seulement des ordres cibles et la séquence de déplacements pour y arriver, ce qui les
- * rend testables et garde `PlayerProvider` lisible.
+ * Le `setShuffleEnabled` natif de @rntp/player mélange l'ordre de LECTURE (Media3) sans toucher à
+ * l'ordre de la file affichée : l'écran File ne refléterait plus ce qui va se jouer. On garde donc
+ * un shuffle « physique » qui réordonne réellement la file par une suite de `moveMediaItem`. Ces
+ * fonctions ne touchent à rien (pas d'IO, pas de lecteur) — elles calculent seulement des ordres
+ * cibles et la séquence de déplacements pour y arriver, ce qui les rend testables et garde
+ * `PlayerProvider` lisible.
  */
 
 /** Mélange une copie du tableau (Fisher-Yates). N'affecte pas l'entrée. */

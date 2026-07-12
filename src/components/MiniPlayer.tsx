@@ -135,7 +135,7 @@ export function MiniPlayer() {
 
         <View style={styles.row}>
           <Cover
-            uri={typeof track.artwork === 'string' ? track.artwork : null}
+            uri={typeof track.artworkUrl === 'string' ? track.artworkUrl : null}
             seed={`${title}${artist}`}
           />
           <View style={styles.meta}>

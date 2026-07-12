@@ -1,61 +1,82 @@
-// Stub web de react-native-track-player.
+// Stub web de @rntp/player.
 //
-// Fuoco est Android only (cf. PROJET.md) : il n'y a pas de lecture sur le web. La vraie
-// implémentation web de RNTP tire `shaka-player` et casse le prerender statique d'Expo
-// (`Class extends value undefined`). Tout le code lecteur est déjà gardé par
-// `Platform.OS !== 'web'`, donc rien de tout ceci ne s'exécute réellement sur le web : ce
-// stub existe uniquement pour que `expo export --platform web` (notre check de bundle) passe.
+// Fuoco est Android only (cf. PROJET.md) : il n'y a pas de lecture sur le web. L'implémentation
+// web de @rntp/player attend `shaka-player` (peer dependency optionnelle, non installée). Tout le
+// code lecteur est déjà gardé par `Platform.OS !== 'web'`, donc rien de tout ceci ne s'exécute
+// réellement sur le web : ce stub existe uniquement pour que `expo export --platform web`
+// (notre check de bundle) passe.
 //
 // Aliasé à la place du paquet npm sur le web via metro.config.js. Les types, eux, restent
 // résolus depuis le vrai paquet (tsc n'utilise pas cet alias), donc l'API tapée reste juste.
+// L'API v5 est majoritairement synchrone : les stubs renvoient des valeurs, pas des promesses.
 
 const noop = () => {};
-const asyncNoop = async () => {};
 
-export const State = {
-  None: 'none',
+export const PlaybackState = {
+  Idle: 'idle',
   Ready: 'ready',
-  Playing: 'playing',
-  Paused: 'paused',
-  Stopped: 'stopped',
   Buffering: 'buffering',
-  Loading: 'loading',
+  Ended: 'ended',
+  Error: 'error',
 };
-export const Capability = {};
+export const RepeatMode = { Off: 'off', One: 'one', All: 'all' };
+export const PlayerCommand = {
+  Seek: 'seek',
+  PlayPause: 'playPause',
+  Next: 'next',
+  Previous: 'previous',
+  Stop: 'stop',
+  SkipForward: 'skipForward',
+  SkipBackward: 'skipBackward',
+};
 export const Event = {};
-export const RepeatMode = { Off: 0, Track: 1, Queue: 2 };
-export const AppKilledPlaybackBehavior = {
-  ContinuePlayback: 'continue-playback',
-  StopPlaybackAndRemoveNotification: 'stop-playback-and-remove-notification',
-  PausePlayback: 'pause-playback',
-};
 
-export const useActiveTrack = () => undefined;
-export const useIsPlaying = () => ({ playing: false, bufferingDuringPlay: false });
-export const useProgress = () => ({ position: 0, duration: 0, buffered: 0 });
+export const useActiveMediaItem = () => null;
+export const useIsPlaying = () => false;
+export const usePlaybackState = () => PlaybackState.Idle;
+export const useProgress = () => ({ position: 0, duration: 0, buffered: 0, cached: 0 });
 
 const TrackPlayer = {
-  registerPlaybackService: noop,
-  setupPlayer: asyncNoop,
-  updateOptions: asyncNoop,
-  setRepeatMode: asyncNoop,
+  setupPlayer: noop,
+  destroy: noop,
+  registerBackgroundEventHandler: noop,
   addEventListener: () => ({ remove: noop }),
-  play: asyncNoop,
-  pause: asyncNoop,
-  stop: asyncNoop,
-  reset: asyncNoop,
-  seekTo: asyncNoop,
-  skip: asyncNoop,
-  skipToNext: asyncNoop,
-  skipToPrevious: asyncNoop,
-  setQueue: asyncNoop,
-  add: asyncNoop,
-  remove: asyncNoop,
-  move: asyncNoop,
-  getQueue: async () => [],
-  getActiveTrackIndex: async () => undefined,
-  getPlaybackState: async () => ({ state: State.None }),
-  getProgress: async () => ({ position: 0, duration: 0, buffered: 0 }),
+  setCommands: noop,
+  play: noop,
+  pause: noop,
+  stop: noop,
+  seekTo: noop,
+  seekBy: noop,
+  skipToNext: noop,
+  skipToPrevious: noop,
+  skipToIndex: noop,
+  retry: noop,
+  setMediaItem: noop,
+  setMediaItems: noop,
+  addMediaItem: noop,
+  addMediaItems: noop,
+  insertMediaItem: noop,
+  insertMediaItems: noop,
+  removeMediaItem: noop,
+  removeMediaItems: noop,
+  replaceMediaItem: noop,
+  moveMediaItem: noop,
+  clear: noop,
+  updateMetadata: noop,
+  getPlaybackState: () => PlaybackState.Idle,
+  isPlaying: () => false,
+  getProgress: () => ({ position: 0, duration: 0, buffered: 0, cached: 0 }),
+  getActiveMediaItem: () => null,
+  getActiveMediaItemIndex: () => null,
+  getQueue: () => [],
+  getRepeatMode: () => RepeatMode.Off,
+  setRepeatMode: noop,
+  isShuffleEnabled: () => false,
+  setShuffleEnabled: noop,
+  sleepAfterTime: noop,
+  sleepAfterMediaItemAtIndex: noop,
+  getSleepTimer: () => null,
+  cancelSleepTimer: noop,
 };
 
 export default TrackPlayer;

@@ -96,8 +96,8 @@ export default function PlaylistScreen() {
 
   // Id partagé de la piste en cours de lecture (le lecteur raisonne en id media-store).
   const activeSharedId = useMemo(
-    () => entries.find((e) => e.localTrack?.id === activeTrack?.id)?.entry.sharedTrackId,
-    [entries, activeTrack?.id]
+    () => entries.find((e) => e.localTrack?.id === activeTrack?.mediaId)?.entry.sharedTrackId,
+    [entries, activeTrack?.mediaId]
   );
 
   // Lance la playlist à partir d'une entrée : ignore les indisponibles, démarre la file sur les

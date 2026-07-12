@@ -8,7 +8,8 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import TrackPlayer, { Event, RepeatMode, State, type Track } from 'react-native-track-player';
+import { AppState, Platform } from 'react-native';
+import TrackPlayer, { Event, RepeatMode, type MediaItem } from '@rntp/player';
 
 import { type LocalTrack } from '@/library/useAudioLibrary';
 import * as db from '@/library/db';
@@ -16,25 +17,24 @@ import { setPlayContext, type PlayContext } from './playRecorder';
 import { ensurePlayerReady } from './setup';
 import { resolvePlayerTracks } from './track';
 import { planMoves, restoreOrder, shuffleAfter } from './shuffle';
-import { smartPrevious } from './controls';
 import { requestNotificationPermission } from './notifPermission';
 
-/** Correspondance `RepeatMode` ↔ valeur persistée (`app_settings`). */
+/** Correspondance `RepeatMode` ↔ valeur persistée (`app_settings`, clés historiques). */
 function repeatFromSetting(value: string | null): RepeatMode {
   if (value === 'queue') {
-    return RepeatMode.Queue;
+    return RepeatMode.All;
   }
   if (value === 'track') {
-    return RepeatMode.Track;
+    return RepeatMode.One;
   }
   return RepeatMode.Off;
 }
 
 function repeatToSetting(mode: RepeatMode): string {
-  if (mode === RepeatMode.Queue) {
+  if (mode === RepeatMode.All) {
     return 'queue';
   }
-  if (mode === RepeatMode.Track) {
+  if (mode === RepeatMode.One) {
     return 'track';
   }
   return 'off';
@@ -43,10 +43,10 @@ function repeatToSetting(mode: RepeatMode): string {
 /** Cycle des modes de répétition : Off → File → Piste → Off. */
 function nextRepeat(mode: RepeatMode): RepeatMode {
   if (mode === RepeatMode.Off) {
-    return RepeatMode.Queue;
+    return RepeatMode.All;
   }
-  if (mode === RepeatMode.Queue) {
-    return RepeatMode.Track;
+  if (mode === RepeatMode.All) {
+    return RepeatMode.One;
   }
   return RepeatMode.Off;
 }
@@ -85,7 +85,7 @@ export type QueueActions = {
 
 /** Instantané réactif de la file, pour l'affichage. */
 export type QueueState = {
-  tracks: Track[];
+  tracks: MediaItem[];
   /** Index de la piste en cours dans `tracks`, ou `undefined` si la file est vide. */
   activeIndex: number | undefined;
 };
@@ -111,15 +111,40 @@ const PlaybackModeContext = createContext<PlaybackMode | null>(null);
 /**
  * Monte le lecteur et fournit ses commandes à l'arbre.
  *
- * L'initialisation est déclenchée au montage mais reste paresseuse et idempotente
- * (cf. `ensurePlayerReady`) : chaque action s'assure que le lecteur est prêt avant d'agir,
- * donc un tap très précoce n'est jamais perdu.
+ * L'initialisation est paresseuse et idempotente (cf. `ensurePlayerReady`) : chaque action
+ * s'assure que le lecteur est prêt avant d'agir, donc un tap très précoce n'est jamais perdu.
+ *
+ * L'API @rntp/player v5 est **synchrone** (TurboModule) : les lectures d'état (`getQueue`,
+ * `getActiveMediaItemIndex`) sont atomiques du point de vue JS, et le natif (MediaController
+ * Media3) est l'unique source de vérité — plus de chaîne de sérialisation ni de numéros de
+ * séquence, la classe entière de bugs « snapshot désynchronisé » de l'alpha disparaît.
+ *
+ * On garde le **shuffle « physique » maison** (réordonnancement réel de la file) plutôt que le
+ * `setShuffleEnabled` natif : celui-ci mélange l'ordre de LECTURE de Media3 sans toucher à
+ * l'ordre de la file (`getQueue`), donc l'écran File et « À suivre » ne refléteraient plus ce
+ * qui va vraiment se jouer.
  *
  * Deux contextes distincts pour éviter des rendus inutiles : les *actions* sont stables, tandis
  * que le *snapshot* de la file (`QueueState`) change à chaque mutation ou avancement de piste.
  */
 export function PlayerProvider({ children }: { children: ReactNode }) {
-  const [queue, setQueue] = useState<QueueState>({ tracks: [], activeIndex: undefined });
+  // Initialiseur paresseux : au (re)montage, on relit l'état natif si le lecteur existe déjà
+  // (rechargement à chaud pendant une lecture) — avant tout setup, les lectures natives
+  // retombent proprement sur « file vide ». L'effet plus bas ne fait que s'abonner
+  // (règle react-hooks/set-state-in-effect).
+  const [queue, setQueue] = useState<QueueState>(() => {
+    if (Platform.OS === 'web') {
+      return { tracks: [], activeIndex: undefined };
+    }
+    try {
+      return {
+        tracks: TrackPlayer.getQueue(),
+        activeIndex: TrackPlayer.getActiveMediaItemIndex() ?? undefined,
+      };
+    } catch {
+      return { tracks: [], activeIndex: undefined };
+    }
+  });
 
   // Mode de lecture (finition Phase 1). État réactif pour l'UI + refs lues hors rendu dans les
   // handlers (évite les closures périmées). Valeurs initiales relues depuis les préférences.
@@ -131,150 +156,127 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   // Ordre de la file avant activation du shuffle, pour pouvoir le restaurer à la désactivation.
   const originalOrderRef = useRef<string[] | null>(null);
 
-  // Sérialise les opérations qui touchent à la file. Les mutations rapides (déplacements
-  // successifs) s'enchaînent alors strictement, sans s'entrelacer : chaque `refreshQueue` lit
-  // donc un état natif stable, et le snapshot reste cohérent (l'index pointe bien sur sa piste).
-  const opChain = useRef<Promise<unknown>>(Promise.resolve());
-  const enqueue = useCallback(<T,>(op: () => Promise<T>): Promise<T> => {
-    const run = opChain.current.then(op, op);
-    // On avale les erreurs sur la chaîne interne pour qu'un échec ne bloque pas les ops suivantes ;
-    // l'appelant, lui, reçoit la vraie promesse (`run`) et peut réagir à l'erreur.
-    opChain.current = run.then(
-      () => undefined,
-      () => undefined
-    );
-    return run;
-  }, []);
-
-  // Numéro de séquence : seul le dernier `refreshQueue` déclenché a le droit de publier son
-  // résultat, pour qu'une lecture native plus lente à revenir n'écrase pas un snapshot plus récent.
-  const refreshSeq = useRef(0);
-
-  // Recharge le snapshot de la file depuis le lecteur (source de vérité).
-  const refreshQueue = useCallback(async () => {
-    if (!(await ensurePlayerReady())) {
+  // Recharge le snapshot de la file depuis le lecteur (source de vérité), en une passe synchrone.
+  const refreshQueue = useCallback(() => {
+    if (!ensurePlayerReady()) {
       return;
     }
-    const seq = ++refreshSeq.current;
-    const [tracks, activeIndex] = await Promise.all([
-      TrackPlayer.getQueue(),
-      TrackPlayer.getActiveTrackIndex(),
-    ]);
-    if (seq !== refreshSeq.current) {
-      return; // Un refresh plus récent a été demandé entre-temps : ce résultat est périmé.
+    const tracks = TrackPlayer.getQueue();
+    const activeIndex = TrackPlayer.getActiveMediaItemIndex();
+    setQueue({ tracks, activeIndex: activeIndex ?? undefined });
+  }, []);
+
+  useEffect(() => {
+    // Mutations de file (add/remove/move/set) et changements de piste active : autant de moments
+    // où le snapshot doit se resynchroniser.
+    const queueSub = TrackPlayer.addEventListener(Event.QueueChanged, refreshQueue);
+    const transitionSub = TrackPlayer.addEventListener(Event.MediaItemTransition, refreshQueue);
+    // Fin de file (hors répétition) : reflète l'état arrêté au lieu de rester figé.
+    const stateSub = TrackPlayer.addEventListener(Event.PlaybackStateChanged, refreshQueue);
+    // En arrière-plan, les événements partent vers le handler headless, pas ici : on relit
+    // l'état natif au retour au premier plan (même motif que les hooks de la lib).
+    const appStateSub = AppState.addEventListener('change', (status) => {
+      if (status === 'active') {
+        refreshQueue();
+      }
+    });
+    return () => {
+      queueSub.remove();
+      transitionSub.remove();
+      stateSub.remove();
+      appStateSub.remove();
+    };
+  }, [refreshQueue]);
+
+  // Applique le mode de répétition persisté une fois le lecteur prêt (le défaut est `Off`).
+  useEffect(() => {
+    if (!ensurePlayerReady()) {
+      return;
     }
-    setQueue({ tracks, activeIndex });
+    TrackPlayer.setRepeatMode(repeatFromSetting(db.getSetting('playback.repeat')));
   }, []);
 
-  useEffect(() => {
-    void enqueue(refreshQueue);
-
-    // La piste active change sur skip, avancement naturel et remplacement de file : autant de
-    // moments où le snapshot doit se resynchroniser. On passe par la même file d'opérations pour
-    // ne pas lire l'état natif au milieu d'une mutation en cours.
-    const sub = TrackPlayer.addEventListener(Event.PlaybackActiveTrackChanged, () => {
-      void enqueue(refreshQueue);
-    });
-    // Fin de file (hors répétition) : resynchronise le snapshot pour que mini-player et écran
-    // Lecture reflètent l'état arrêté au lieu de rester figés sur la dernière piste « en cours ».
-    const endSub = TrackPlayer.addEventListener(Event.PlaybackQueueEnded, () => {
-      void enqueue(refreshQueue);
-    });
-    return () => {
-      sub.remove();
-      endSub.remove();
-    };
-  }, [enqueue, refreshQueue]);
-
-  // Applique le mode de répétition persisté une fois le lecteur prêt (le défaut RNTP est `Off`).
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      if (!(await ensurePlayerReady())) {
-        return;
-      }
-      const mode = repeatFromSetting(db.getSetting('playback.repeat'));
-      await TrackPlayer.setRepeatMode(mode);
-      if (!cancelled) {
-        setRepeatMode(mode);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Un seul lancement en vol à la fois : si deux `playQueue` se chevauchent (la résolution des
+  // URI est asynchrone), seul le plus récent a le droit de charger la file.
+  const playSeq = useRef(0);
 
   const playQueue = useCallback(
-    (tracks: LocalTrack[], startIndex: number, context?: PlayContext) =>
-      enqueue(async () => {
-        if (!(await ensurePlayerReady()) || tracks.length === 0) {
-          return;
-        }
-        // Posé avant `setQueue` : le `PlaybackActiveTrackChanged` qui suit ouvre la session
-        // d'écoute avec cette provenance (#25).
-        setPlayContext(context ?? null);
-        // Android 13+ : sans elle, la notification média est masquée. Non bloquant (la lecture
-        // démarre pendant que le dialogue système s'affiche), demandé au premier vrai besoin.
-        requestNotificationPermission();
-        const targetId = tracks[startIndex]?.id;
-        const resolved = await resolvePlayerTracks(tracks);
-        if (resolved.length === 0) {
-          return;
-        }
-        const resumeIndex = Math.max(
-          0,
-          resolved.findIndex((track) => track.id === targetId)
-        );
+    async (tracks: LocalTrack[], startIndex: number, context?: PlayContext) => {
+      if (!ensurePlayerReady() || tracks.length === 0) {
+        return;
+      }
+      const seq = ++playSeq.current;
+      // Posé avant le chargement : le `MediaItemTransition` qui suit ouvre la session
+      // d'écoute avec cette provenance (#25).
+      setPlayContext(context ?? null);
+      // Android 13+ : sans elle, la notification média est masquée. Non bloquant (la lecture
+      // démarre pendant que le dialogue système s'affiche), demandé au premier vrai besoin.
+      requestNotificationPermission();
+      const targetId = tracks[startIndex]?.id;
+      const resolved = await resolvePlayerTracks(tracks);
+      if (resolved.length === 0 || seq !== playSeq.current) {
+        return;
+      }
+      const resumeIndex = Math.max(
+        0,
+        resolved.findIndex((track) => track.mediaId === targetId)
+      );
 
-        // Ordre final calculé AVANT de charger la file. En shuffle, on mélange la suite du titre
-        // tapé (gardé en place par `shuffleAfter`, donc toujours à `resumeIndex`), puis on charge
-        // la file déjà mélangée. On ne réordonne JAMAIS après `skip`/`play` : enchaîner des `move`
-        // sur une file en cours de transition (ExoPlayer encore en buffering) faisait dériver la
-        // piste réellement lue vers un titre aléatoire de la file mélangée.
-        let finalTracks = resolved;
-        if (shuffleRef.current) {
-          const ids = resolved.map((t) => String(t.id));
-          originalOrderRef.current = ids;
-          const byId = new Map(resolved.map((t) => [String(t.id), t]));
-          finalTracks = shuffleAfter(ids, resumeIndex)
-            .map((id) => byId.get(id))
-            .filter((track): track is Track => track !== undefined);
-        }
+      // En shuffle, l'ordre final est calculé AVANT de charger la file : on mélange la suite du
+      // titre tapé (gardé en place par `shuffleAfter`, donc toujours à `resumeIndex`), puis on
+      // charge la file déjà mélangée.
+      let finalTracks = resolved;
+      if (shuffleRef.current) {
+        const ids = resolved.map((t) => t.mediaId ?? '');
+        originalOrderRef.current = ids;
+        const byId = new Map(resolved.map((t) => [t.mediaId ?? '', t]));
+        finalTracks = shuffleAfter(ids, resumeIndex)
+          .map((id) => byId.get(id))
+          .filter((track): track is MediaItem => track !== undefined);
+      }
 
-        await TrackPlayer.setQueue(finalTracks);
-        await TrackPlayer.skip(resumeIndex);
-        await TrackPlayer.play();
-        await refreshQueue();
-      }),
-    [enqueue, refreshQueue]
+      TrackPlayer.setMediaItems(finalTracks, resumeIndex);
+      TrackPlayer.play();
+      refreshQueue();
+    },
+    [refreshQueue]
   );
 
   const togglePlayPause = useCallback(async () => {
-    if (!(await ensurePlayerReady())) {
+    if (!ensurePlayerReady()) {
       return;
     }
-    const { state } = await TrackPlayer.getPlaybackState();
-    if (state === State.Playing || state === State.Buffering || state === State.Loading) {
-      await TrackPlayer.pause();
+    if (TrackPlayer.isPlaying()) {
+      TrackPlayer.pause();
     } else {
-      await TrackPlayer.play();
+      TrackPlayer.play();
     }
   }, []);
 
-  const skipToNext = useCallback(() => void TrackPlayer.skipToNext().catch(() => {}), []);
-  // « Précédent » intelligent : > 3 s de lecture = redémarrer la piste, sinon reculer.
-  const skipToPrevious = useCallback(() => void smartPrevious().catch(() => {}), []);
-  const seekTo = useCallback((seconds: number) => void TrackPlayer.seekTo(seconds), []);
+  const skipToNext = useCallback(() => {
+    if (ensurePlayerReady()) {
+      TrackPlayer.skipToNext();
+    }
+  }, []);
+  // « Précédent » intelligent (> 3 s de lecture = redémarrer la piste) : natif en v5.
+  const skipToPrevious = useCallback(() => {
+    if (ensurePlayerReady()) {
+      TrackPlayer.skipToPrevious();
+    }
+  }, []);
+  const seekTo = useCallback((seconds: number) => {
+    if (ensurePlayerReady()) {
+      TrackPlayer.seekTo(seconds);
+    }
+  }, []);
 
   const cycleRepeat = useCallback(() => {
     setRepeatMode((prev) => {
       const next = nextRepeat(prev);
       db.setSetting('playback.repeat', repeatToSetting(next));
-      void ensurePlayerReady().then((ok) => {
-        if (ok) {
-          void TrackPlayer.setRepeatMode(next);
-        }
-      });
+      if (ensurePlayerReady()) {
+        TrackPlayer.setRepeatMode(next);
+      }
       return next;
     });
   }, []);
@@ -282,11 +284,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const setRepeat = useCallback((mode: RepeatMode) => {
     setRepeatMode(mode);
     db.setSetting('playback.repeat', repeatToSetting(mode));
-    void ensurePlayerReady().then((ok) => {
-      if (ok) {
-        void TrackPlayer.setRepeatMode(mode);
-      }
-    });
+    if (ensurePlayerReady()) {
+      TrackPlayer.setRepeatMode(mode);
+    }
   }, []);
 
   const toggleShuffle = useCallback(() => {
@@ -294,134 +294,123 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     shuffleRef.current = next;
     setShuffle(next);
     db.setSetting('playback.shuffle', next ? '1' : '0');
-    void enqueue(async () => {
-      if (!(await ensurePlayerReady())) {
-        return;
-      }
-      const [tracks, activeIndexRaw] = await Promise.all([
-        TrackPlayer.getQueue(),
-        TrackPlayer.getActiveTrackIndex(),
-      ]);
-      const currentIds = tracks.map((t) => String(t.id));
-      if (currentIds.length === 0) {
-        return;
-      }
-      const activeIndex = activeIndexRaw ?? -1;
-      let target: string[];
-      if (next) {
-        // Activation : on garde l'ordre courant comme référence, puis on mélange la suite.
-        originalOrderRef.current = currentIds;
-        target = shuffleAfter(currentIds, activeIndex);
-      } else {
-        // Désactivation : on restaure l'ordre d'origine (ids disparus ignorés, ajoutés en fin).
-        target = restoreOrder(currentIds, originalOrderRef.current ?? currentIds);
-      }
-      for (const [from, to] of planMoves(currentIds, target)) {
-        await TrackPlayer.move(from, to);
-      }
-      await refreshQueue();
-    });
-  }, [enqueue, refreshQueue]);
+    if (!ensurePlayerReady()) {
+      return;
+    }
+    const currentIds = TrackPlayer.getQueue().map((t) => t.mediaId ?? '');
+    if (currentIds.length === 0) {
+      return;
+    }
+    const activeIndex = TrackPlayer.getActiveMediaItemIndex() ?? -1;
+    let target: string[];
+    if (next) {
+      // Activation : on garde l'ordre courant comme référence, puis on mélange la suite.
+      originalOrderRef.current = currentIds;
+      target = shuffleAfter(currentIds, activeIndex);
+    } else {
+      // Désactivation : on restaure l'ordre d'origine (ids disparus ignorés, ajoutés en fin).
+      target = restoreOrder(currentIds, originalOrderRef.current ?? currentIds);
+    }
+    for (const [from, to] of planMoves(currentIds, target)) {
+      TrackPlayer.moveMediaItem(from, to);
+    }
+    refreshQueue();
+  }, [refreshQueue]);
 
   const addToQueue = useCallback(
-    (tracks: LocalTrack[]) =>
-      enqueue(async () => {
-        if (!(await ensurePlayerReady())) {
-          return;
-        }
-        const resolved = await resolvePlayerTracks(tracks);
-        if (resolved.length === 0) {
-          return;
-        }
-        await TrackPlayer.add(resolved);
-        await refreshQueue();
-      }),
-    [enqueue, refreshQueue]
+    async (tracks: LocalTrack[]) => {
+      if (!ensurePlayerReady()) {
+        return;
+      }
+      const resolved = await resolvePlayerTracks(tracks);
+      if (resolved.length === 0) {
+        return;
+      }
+      TrackPlayer.addMediaItems(resolved);
+      refreshQueue();
+    },
+    [refreshQueue]
   );
 
   const playNext = useCallback(
-    (tracks: LocalTrack[]) =>
-      enqueue(async () => {
-        if (!(await ensurePlayerReady())) {
-          return;
-        }
-        const resolved = await resolvePlayerTracks(tracks);
-        if (resolved.length === 0) {
-          return;
-        }
-        // Sans piste active (file vide), on ajoute simplement à la fin.
-        const activeIndex = await TrackPlayer.getActiveTrackIndex();
-        const insertBefore = activeIndex != null ? activeIndex + 1 : undefined;
-        await TrackPlayer.add(resolved, insertBefore);
-        await refreshQueue();
-      }),
-    [enqueue, refreshQueue]
+    async (tracks: LocalTrack[]) => {
+      if (!ensurePlayerReady()) {
+        return;
+      }
+      const resolved = await resolvePlayerTracks(tracks);
+      if (resolved.length === 0) {
+        return;
+      }
+      // Sans piste active (file vide), on ajoute simplement à la fin.
+      const activeIndex = TrackPlayer.getActiveMediaItemIndex();
+      if (activeIndex != null) {
+        TrackPlayer.insertMediaItems(activeIndex + 1, resolved);
+      } else {
+        TrackPlayer.addMediaItems(resolved);
+      }
+      refreshQueue();
+    },
+    [refreshQueue]
   );
 
   const removeFromQueue = useCallback(
-    (index: number) =>
-      enqueue(async () => {
-        if (!(await ensurePlayerReady())) {
-          return;
-        }
-        await TrackPlayer.remove(index);
-        await refreshQueue();
-      }),
-    [enqueue, refreshQueue]
+    async (index: number) => {
+      if (!ensurePlayerReady()) {
+        return;
+      }
+      TrackPlayer.removeMediaItem(index);
+      refreshQueue();
+    },
+    [refreshQueue]
   );
 
   const moveInQueue = useCallback(
-    (fromIndex: number, toIndex: number) =>
-      enqueue(async () => {
-        if (!(await ensurePlayerReady())) {
-          return;
-        }
-        await TrackPlayer.move(fromIndex, toIndex);
-        await refreshQueue();
-      }),
-    [enqueue, refreshQueue]
+    async (fromIndex: number, toIndex: number) => {
+      if (!ensurePlayerReady()) {
+        return;
+      }
+      TrackPlayer.moveMediaItem(fromIndex, toIndex);
+      refreshQueue();
+    },
+    [refreshQueue]
   );
 
   const skipToIndex = useCallback(
-    (index: number) =>
-      enqueue(async () => {
-        if (!(await ensurePlayerReady())) {
-          return;
-        }
-        await TrackPlayer.skip(index);
-        await TrackPlayer.play();
-        await refreshQueue();
-      }),
-    [enqueue, refreshQueue]
+    async (index: number) => {
+      if (!ensurePlayerReady()) {
+        return;
+      }
+      TrackPlayer.skipToIndex(index);
+      TrackPlayer.play();
+      refreshQueue();
+    },
+    [refreshQueue]
   );
 
-  const clearQueue = useCallback(
-    () =>
-      enqueue(async () => {
-        if (!(await ensurePlayerReady())) {
-          return;
-        }
-        const [tracks, activeIndex] = await Promise.all([
-          TrackPlayer.getQueue(),
-          TrackPlayer.getActiveTrackIndex(),
-        ]);
-        if (tracks.length === 0) {
-          return;
-        }
-        if (activeIndex == null) {
-          // Rien en lecture : on remet le lecteur à zéro.
-          await TrackPlayer.reset();
-        } else {
-          // On retire tout sauf la piste en cours (passées ET à venir), en un seul appel natif.
-          const others = tracks.map((_t, i) => i).filter((i) => i !== activeIndex);
-          if (others.length > 0) {
-            await TrackPlayer.remove(others);
-          }
-        }
-        await refreshQueue();
-      }),
-    [enqueue, refreshQueue]
-  );
+  const clearQueue = useCallback(async () => {
+    if (!ensurePlayerReady()) {
+      return;
+    }
+    const length = TrackPlayer.getQueue().length;
+    if (length === 0) {
+      return;
+    }
+    const activeIndex = TrackPlayer.getActiveMediaItemIndex();
+    if (activeIndex == null) {
+      // Rien en lecture : on remet le lecteur à zéro.
+      TrackPlayer.clear();
+    } else {
+      // On retire tout sauf la piste en cours, par plages [from, to) : d'abord APRÈS elle,
+      // puis AVANT (dans cet ordre — retirer avant décalerait l'index de la piste en cours).
+      if (activeIndex + 1 < length) {
+        TrackPlayer.removeMediaItems(activeIndex + 1, length);
+      }
+      if (activeIndex > 0) {
+        TrackPlayer.removeMediaItems(0, activeIndex);
+      }
+    }
+    refreshQueue();
+  }, [refreshQueue]);
 
   const actions = useMemo<PlayerActions & QueueActions>(
     () => ({

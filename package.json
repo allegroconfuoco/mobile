@@ -5,6 +5,7 @@
   "dependencies": {
     "@expo-google-fonts/schibsted-grotesk": "^0.4.2",
     "@expo/ui": "~56.0.18",
+    "@rntp/player": "^5.6.0",
     "expo": "~56.0.12",
     "expo-application": "~56.0.3",
     "expo-constants": "~56.0.18",
@@ -34,7 +35,6 @@
     "react-native-reanimated": "4.3.1",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "4.25.2",
-    "react-native-track-player": "^5.0.0-alpha0",
     "react-native-view-shot": "5.1.0",
     "react-native-web": "~0.21.0",
     "react-native-worklets": "0.8.3"

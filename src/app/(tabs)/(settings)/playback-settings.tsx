@@ -1,7 +1,7 @@
 import { Switch, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { RepeatMode } from 'react-native-track-player';
+import { RepeatMode } from '@rntp/player';
 
 import { colors, spacing, typography } from '@/theme';
 import { BackButton } from '@/components/BackButton';
@@ -19,10 +19,10 @@ const REPEAT_SEGMENTS: Segment<RepeatKey>[] = [
 ];
 
 function repeatToKey(mode: RepeatMode): RepeatKey {
-  if (mode === RepeatMode.Queue) {
+  if (mode === RepeatMode.All) {
     return 'queue';
   }
-  if (mode === RepeatMode.Track) {
+  if (mode === RepeatMode.One) {
     return 'track';
   }
   return 'off';
@@ -30,10 +30,10 @@ function repeatToKey(mode: RepeatMode): RepeatKey {
 
 function keyToRepeat(key: RepeatKey): RepeatMode {
   if (key === 'queue') {
-    return RepeatMode.Queue;
+    return RepeatMode.All;
   }
   if (key === 'track') {
-    return RepeatMode.Track;
+    return RepeatMode.One;
   }
   return RepeatMode.Off;
 }

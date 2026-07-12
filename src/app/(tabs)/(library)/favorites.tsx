@@ -91,7 +91,7 @@ export default function FavoritesScreen() {
           <TrackIndexRow
             track={item}
             index={index}
-            isActive={item.id === activeTrack?.id}
+            isActive={item.id === activeTrack?.mediaId}
             onPlay={playFrom}
             onLongPress={trackMenu.open}
           />

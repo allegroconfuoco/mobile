@@ -193,7 +193,7 @@ export default function AlbumScreen() {
             <TrackIndexRow
               track={item.track}
               index={indexById.get(item.track.id) ?? 0}
-              isActive={item.track.id === activeTrack?.id}
+              isActive={item.track.id === activeTrack?.mediaId}
               leadingNumber={item.track.trackNo ?? (indexById.get(item.track.id) ?? 0) + 1}
               subtitle={item.track.artist ?? UNKNOWN_ARTIST}
               onPlay={playFrom}

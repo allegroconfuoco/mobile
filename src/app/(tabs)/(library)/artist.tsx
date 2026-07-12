@@ -115,7 +115,7 @@ export default function ArtistScreen() {
           <TrackIndexRow
             track={item}
             index={indexById.get(item.id) ?? 0}
-            isActive={item.id === activeTrack?.id}
+            isActive={item.id === activeTrack?.mediaId}
             leadingNumber={item.trackNo ?? index + 1}
             // L'album est déjà dans l'en-tête de section : sous-titre masqué pour ne pas répéter.
             subtitle=""

@@ -204,7 +204,7 @@ function LibraryContent({
         <TracksView
           tracks={filteredTracks}
           query={query}
-          activeId={activeTrack?.id}
+          activeId={activeTrack?.mediaId}
           sort={trackSort}
           onToggleSort={() => setTrackSort(nextSort(trackSort))}
           onPlay={playFromFiltered}
