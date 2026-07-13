@@ -5,6 +5,7 @@ import { Image } from 'expo-image';
 import { colors, coverFallback, radii, spacing, typography } from '@/theme';
 import { Icon } from '@/components/Icon';
 import { selection, tapLight } from '@/lib/haptics';
+import { resolveIncomingOrder, type PendingOrder } from '@/lib/dragOrder';
 
 /**
  * Liste de pistes réordonnable par glisser-déposer, sans dépendance native.
@@ -74,6 +75,14 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+/**
+ * Durée pendant laquelle un ordre optimiste (posé au lâcher) prime sur un `items` entrant qui ne
+ * le reflète pas encore. La persistance (SQLite différée, `moveMediaItem` natif) confirme bien
+ * avant ; passé ce délai, la source externe reprend la main (filet à identité d'objet, pas de
+ * lecture d'horloge au rendu — react-hooks/purity).
+ */
+const PENDING_TTL_MS = 2000;
+
 export function DraggableTrackList({
   items,
   activeTrackId,
@@ -107,9 +116,16 @@ export function DraggableTrackList({
   // tout flash entre le lâcher optimiste et la confirmation.
   const [data, setData] = useState<DraggableTrackItem[]>(items);
   const [syncedItems, setSyncedItems] = useState<DraggableTrackItem[]>(items);
+  // Ordre optimiste en attente de confirmation : tant qu'il est posé, un `items` entrant qui
+  // porte les mêmes pistes dans l'ancien ordre ne peut pas écraser l'ordre du lâcher.
+  const [pendingOrder, setPendingOrder] = useState<PendingOrder | null>(null);
   if (items !== syncedItems && draggingIndex === null) {
     setSyncedItems(items);
-    setData(items);
+    const resolution = resolveIncomingOrder(items, pendingOrder);
+    setData(resolution.data);
+    if (!resolution.keepPending && pendingOrder !== null) {
+      setPendingOrder(null);
+    }
   }
   // Longueur courante lue par les handlers de geste : mise à jour hors rendu (règle react-hooks/refs).
   useEffect(() => {
@@ -192,7 +208,17 @@ export function DraggableTrackList({
     const to = computeHover(index);
     if (to !== index) {
       tapLight();
-      setData((current) => arrayMove(current, index, to));
+      // `data` est fraîche ici : les handlers de geste passent par `propsRef` (mise à jour à
+      // chaque rendu) et `data` ne bouge pas pendant un glisser (la resync est suspendue).
+      const next = arrayMove(data, index, to);
+      const pending: PendingOrder = { ids: next.map((item) => item.id) };
+      setData(next);
+      setPendingOrder(pending);
+      // Filet : passé le TTL sans confirmation, la source externe reprend la main. Comparaison à
+      // identité d'objet — un lâcher plus récent a déjà remplacé `pending`, on ne l'efface pas.
+      setTimeout(() => {
+        setPendingOrder((current) => (current === pending ? null : current));
+      }, PENDING_TTL_MS);
       onMove(index, to);
     }
     pan.setValue(0);

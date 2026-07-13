@@ -4,9 +4,9 @@ import { uuidv7 } from '@/sync/uuid';
 import { createPlayRecorder, type PlayContext } from './playSession';
 
 /**
- * Enregistreur d'écoutes (issue #25) — singleton de module branché dans le service RNTP (seul
- * code garanti vivant en arrière-plan), même motif que `sleepTimer`. Service et UI partagent le
- * même runtime JS, donc ce store est visible des deux côtés.
+ * Enregistreur d'écoutes (issue #25) — singleton de module branché sur les événements du lecteur
+ * (`playerEvents.ts`, premier plan ET arrière-plan headless). Les deux canaux partagent le même
+ * runtime JS, donc ce store est visible des deux côtés.
  *
  * La logique de session vit dans `playSession.ts` (cœur pur, testé au harnais) ; ici on ne fait
  * que câbler les effets réels : horloge, UUIDv7, préférence incognito et écriture en base avec
@@ -64,8 +64,9 @@ export function setPlayContext(context: PlayContext | null): void {
 /** État de lecture courant (position réelle), poussé au serveur par la sync (handoff). */
 export const getPlaybackSnapshot = recorder.getSnapshot;
 
-/** Hooks du service RNTP (voir `service.ts`). */
+/** Hooks des événements lecteur (voir `playerEvents.ts`). */
 export const recorderOnTrackChanged = recorder.onTrackChanged;
 export const recorderOnProgressTick = recorder.onProgressTick;
+export const recorderOnResume = recorder.onResume;
 export const recorderOnPause = recorder.onPause;
 export const recorderOnQueueEnded = recorder.onQueueEnded;

@@ -28,7 +28,13 @@ export default function TabsLayout() {
   }, []);
 
   return (
-    <Tabs screenOptions={{ headerShown: false }} tabBar={(props) => <ForgeTabBar {...props} />}>
+    // `freezeOnBlur` (forwardé à react-native-screens / react-freeze) : les onglets non focalisés
+    // ne re-rendent plus du tout — état et pile conservés, `useFocusEffect` refire bien au retour.
+    // Le layout lui-même (donc le BackHandler ci-dessus) n'est jamais gelé, seul le contenu l'est.
+    <Tabs
+      screenOptions={{ headerShown: false, freezeOnBlur: true }}
+      tabBar={(props) => <ForgeTabBar {...props} />}
+    >
       {/* Chaque onglet est un Stack (groupe entre parenthèses, invisible dans l'URL) : les écrans de
           détail y sont poussés en gardant la tab bar + le mini-player visibles. */}
       <Tabs.Screen name="(library)" options={{ title: 'Biblio' }} />

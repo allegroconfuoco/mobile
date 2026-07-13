@@ -22,7 +22,7 @@ import {
 import * as db from '@/library/db';
 import { useLibrary } from '@/library/LibraryProvider';
 import { usePlayer } from '@/player/PlayerProvider';
-import { usePlayback } from '@/player/usePlayback';
+import { useActiveTrack } from '@/player/usePlayback';
 
 /**
  * Détail d'un album (issue #13) : ses pistes dans l'ordre (disque, puis n° de piste, puis titre).
@@ -41,7 +41,7 @@ export default function AlbumScreen() {
 
   const { tracks } = useLibrary();
   const { playQueue } = usePlayer();
-  const { track: activeTrack } = usePlayback();
+  const activeTrack = useActiveTrack();
   const trackMenu = useTrackActionsMenu();
 
   // Pistes locales, sections (locaux + fantômes) et index de lecture, dérivés ensemble. Si l'album
@@ -160,14 +160,23 @@ export default function AlbumScreen() {
               {ghostCount > 0 ? ` · ${ghostCount} manquant${ghostCount > 1 ? 's' : ''}` : ''}
             </Text>
             {isUnknownBucket ? (
+              /* Bac « Album inconnu » : bandeau explicite plutôt qu'un badge discret — le mode
+                 (ranger des titres épars, pas identifier UNE release) doit se voir AVANT
+                 d'ouvrir le menu « … », qui change d'action primaire sur ce bac. */
               <Pressable
                 onPress={sortUnknown}
-                style={styles.badge}
+                style={({ pressed }) => [styles.bucketBanner, pressed && styles.bucketPressed]}
                 accessibilityRole="button"
                 accessibilityLabel="Ranger les titres dans leurs albums via MusicBrainz"
               >
-                <Icon name="auto_fix_high" size={14} color={colors.accentLabel} />
-                <Text style={styles.badgeText}>Ranger les titres via MusicBrainz</Text>
+                <Icon name="auto_fix_high" size={22} color={colors.accentIcon} />
+                <View style={styles.bucketBannerText}>
+                  <Text style={styles.bucketBannerTitle}>Ranger les titres via MusicBrainz</Text>
+                  <Text style={styles.bucketBannerHint}>
+                    Titres sans album — chacun sera rangé dans le sien.
+                  </Text>
+                </View>
+                <Icon name="chevron_right" size={22} color={colors.textMuted} />
               </Pressable>
             ) : (
               !identified &&
@@ -193,7 +202,7 @@ export default function AlbumScreen() {
             <TrackIndexRow
               track={item.track}
               index={indexById.get(item.track.id) ?? 0}
-              isActive={item.track.id === activeTrack?.id}
+              isActive={item.track.id === activeTrack?.mediaId}
               leadingNumber={item.track.trackNo ?? (indexById.get(item.track.id) ?? 0) + 1}
               subtitle={item.track.artist ?? UNKNOWN_ARTIST}
               onPlay={playFrom}
@@ -314,6 +323,36 @@ const styles = StyleSheet.create({
     ...typography.label,
     fontSize: 10,
     color: colors.accentLabel,
+  },
+  bucketBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'stretch',
+    gap: spacing.md,
+    marginTop: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  bucketPressed: {
+    backgroundColor: colors.background,
+  },
+  bucketBannerText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  bucketBannerTitle: {
+    ...typography.heading,
+    fontSize: 14,
+  },
+  bucketBannerHint: {
+    ...typography.body,
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
   },
   header: {
     alignItems: 'center',

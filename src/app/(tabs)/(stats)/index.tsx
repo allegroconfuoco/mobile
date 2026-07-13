@@ -1,5 +1,13 @@
 import { useCallback, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import {
+  Alert,
+  InteractionManager,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import { useRouter } from '@/lib/useRouter';
@@ -11,12 +19,10 @@ import { Icon } from '@/components/Icon';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { showToast } from '@/components/Toast';
 import { TrackCover } from '@/components/TrackCover';
-import { tapLight } from '@/lib/haptics';
 import * as db from '@/library/db';
 import { useLibrary } from '@/library/LibraryProvider';
 import type { LocalTrack } from '@/library/useAudioLibrary';
 import { usePlayer } from '@/player/PlayerProvider';
-import { isIncognitoEnabled, setIncognitoEnabled } from '@/player/playRecorder';
 import { buildExportCsv, buildExportJson } from '@/history/exportData';
 import { formatDuration } from '@/history/format';
 import {
@@ -34,8 +40,8 @@ import {
 /**
  * Onglet Écoutes (issue #25) : tableau de bord des statistiques (période 4 semaines / 6 mois /
  * toujours), tendance, tops, habitudes, découverte — le tout calculé en SQL local, donc
- * hors-ligne. Porte aussi l'entrée vers l'historique complet et le mode « écoute privée ».
- * Graphiques maison (Views), zéro dépendance de chart.
+ * hors-ligne. Porte aussi l'entrée vers l'historique complet ; le mode « écoute privée » vit
+ * dans les Réglages (Confidentialité). Graphiques maison (Views), zéro dépendance de chart.
  */
 
 const PERIODS: { value: StatsPeriod; label: string }[] = [
@@ -120,25 +126,31 @@ export default function StatsScreen() {
 
   const [period, setPeriod] = useState<StatsPeriod>('4w');
   const [data, setData] = useState<Dashboard>(() => loadDashboard('4w'));
-  const [incognito, setIncognito] = useState(() => isIncognitoEnabled());
+  // Version des écoutes au moment du calcul : si rien n'a bougé, le dashboard affiché est juste.
+  const [computedAt, setComputedAt] = useState(() => db.getPlayEventsVersion());
 
-  // Recalcule à chaque retour sur l'onglet (les écoutes s'accumulent pendant qu'on navigue)
-  // et à chaque changement de période. Les agrégats SQL sont bon marché à cette échelle.
+  // Au retour sur l'onglet, on ne recalcule les ~10 agrégats SQL que si `play_events` a bougé
+  // (compteur de version, cf. db.ts) — sinon l'onglet se focalise sans aucun travail. Et quand il
+  // faut recalculer, l'ancien dashboard reste affiché pendant que le recalcul part **après** la
+  // transition (stale-while-revalidate) : le changement d'onglet se peint d'abord.
   useFocusEffect(
     useCallback(() => {
-      setData(loadDashboard(period));
-    }, [period])
+      if (db.getPlayEventsVersion() === computedAt) {
+        return;
+      }
+      const task = InteractionManager.runAfterInteractions(() => {
+        setComputedAt(db.getPlayEventsVersion());
+        setData(loadDashboard(period));
+      });
+      return () => task.cancel();
+    }, [period, computedAt])
   );
 
+  // Changement de période : action utilisateur explicite, recalcul synchrone immédiat.
   const changePeriod = (next: StatsPeriod) => {
     setPeriod(next);
+    setComputedAt(db.getPlayEventsVersion());
     setData(loadDashboard(next));
-  };
-
-  const toggleIncognito = (next: boolean) => {
-    tapLight();
-    setIncognito(next);
-    setIncognitoEnabled(next);
   };
 
   const playTop = (row: db.TopTrackRow) => {
@@ -348,28 +360,6 @@ export default function StatsScreen() {
             </View>
             <Icon name="chevron_right" size={22} color={colors.textMuted} />
           </Pressable>
-
-          <View style={styles.row}>
-            <Icon
-              name="visibility_off"
-              size={24}
-              color={incognito ? colors.accent : colors.accentIcon}
-            />
-            <View style={styles.rowText}>
-              <Text style={styles.rowLabel}>Écoute privée</Text>
-              <Text style={styles.rowHint}>
-                {incognito
-                  ? 'Actif — les écoutes ne sont pas enregistrées'
-                  : 'Suspend l’enregistrement de l’historique'}
-              </Text>
-            </View>
-            <Switch
-              value={incognito}
-              onValueChange={toggleIncognito}
-              trackColor={{ false: colors.borderStrong, true: colors.accent }}
-              thumbColor={colors.textPrimary}
-            />
-          </View>
         </View>
       </ScrollView>
     </View>

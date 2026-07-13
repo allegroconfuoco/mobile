@@ -1,9 +1,9 @@
-import type { Track } from 'react-native-track-player';
+import type { MediaItem } from '@rntp/player';
 
 /**
  * Cœur **pur** de l'enregistreur d'écoutes (issue #25) — aucune dépendance runtime (seul le type
- * `Track` de RNTP est importé, effacé à la compilation), donc testable au harnais tsx. Le câblage
- * réel (base, horloge, incognito) vit dans `playRecorder.ts`.
+ * `MediaItem` de @rntp/player est importé, effacé à la compilation), donc testable au harnais
+ * tsx. Le câblage réel (base, horloge, incognito) vit dans `playRecorder.ts`.
  *
  * Une **session** = une piste active. Le temps écouté est le **cumul des ticks de progression**
  * (1 s, émis uniquement en lecture, cf. `setup.ts`) : robuste aux seeks, aucune position de fin à
@@ -62,9 +62,11 @@ export type PlayRecorder = {
   /** Pose le contexte du prochain lancement (appelé par `playQueue`). */
   setContext: (context: PlayContext | null) => void;
   /** Changement de piste active : clôt la session en cours, en ouvre une pour `next`. */
-  onTrackChanged: (next: Track | undefined) => void;
+  onTrackChanged: (next: MediaItem | undefined) => void;
   /** Tick de progression (1 s, lecture en cours) : cumule le temps écouté + suit la position. */
   onProgressTick: (durationSeconds?: number, positionSeconds?: number) => void;
+  /** Reprise de lecture : remet le snapshot handoff en « en lecture ». */
+  onResume: () => void;
   /** Pause/arrêt : écrit l'état courant sans clore la session (une reprise cumulera dessus). */
   onPause: () => void;
   /** Fin de file (hors répétition) : clôt et écrit la session. */
@@ -128,17 +130,17 @@ export function createPlayRecorder(deps: RecorderDeps): PlayRecorder {
 
     onTrackChanged(next) {
       flush(true);
-      // `toPlayerTrack` pose toujours l'id media-store sur la piste ; sans id (piste étrangère
+      // `toPlayerTrack` pose toujours l'id media-store en `mediaId` ; sans lui (piste étrangère
       // au modèle, ne devrait pas arriver), on n'enregistre rien.
-      if (next?.id == null) {
+      if (next?.mediaId == null) {
         return;
       }
       session = {
         eventId: deps.newId(),
-        localTrackId: String(next.id),
+        localTrackId: next.mediaId,
         title: typeof next.title === 'string' ? next.title : null,
         artist: typeof next.artist === 'string' ? next.artist : null,
-        album: typeof next.album === 'string' ? next.album : null,
+        album: typeof next.albumTitle === 'string' ? next.albumTitle : null,
         startedAt: deps.now(),
         playedMs: 0,
         durationMs: typeof next.duration === 'number' ? Math.round(next.duration * 1000) : null,
@@ -154,9 +156,11 @@ export function createPlayRecorder(deps: RecorderDeps): PlayRecorder {
     },
 
     onProgressTick(durationSeconds, positionSeconds) {
+      // Position seulement : ne touche pas à `isPlaying` — le lecteur émet un tick FINAL à la
+      // pause (après l'événement de pause), qui écraserait sinon l'état « en pause » du handoff.
+      // Les transitions lecture/pause passent par `onResume`/`onPause`, explicites.
       if (snapshot && positionSeconds != null) {
         snapshot.positionMs = Math.round(positionSeconds * 1000);
-        snapshot.isPlaying = true;
         snapshot.updatedAt = deps.now();
       }
       if (!session) {
@@ -166,6 +170,13 @@ export function createPlayRecorder(deps: RecorderDeps): PlayRecorder {
       // La durée manque parfois au chargement (tag absent) : le tick de progression la connaît.
       if (session.durationMs === null && durationSeconds != null && durationSeconds > 0) {
         session.durationMs = Math.round(durationSeconds * 1000);
+      }
+    },
+
+    onResume() {
+      if (snapshot) {
+        snapshot.isPlaying = true;
+        snapshot.updatedAt = deps.now();
       }
     },
 

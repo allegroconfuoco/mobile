@@ -16,8 +16,11 @@ import { colors, spacing, typography } from '@/theme';
 import { Icon, type IconName } from '@/components/Icon';
 import { SearchBar } from '@/components/SearchBar';
 import { SegmentedControl, type Segment } from '@/components/SegmentedControl';
+import { showToast } from '@/components/Toast';
 import { useTrackActionsMenu } from '@/components/useTrackActionsMenu';
 import { PlaylistNameDialog } from '@/components/PlaylistNameDialog';
+import { PlaylistPickerSheet } from '@/components/PlaylistPickerSheet';
+import { tapLight } from '@/lib/haptics';
 import { ResumeCard } from '@/components/ResumeCard';
 import { TrackCover } from '@/components/TrackCover';
 import { TrackIndexRow, trackRowLayout } from '@/components/TrackRow';
@@ -36,7 +39,7 @@ import { usePlaylistsContext } from '@/library/PlaylistsProvider';
 import { useFavorites } from '@/library/FavoritesProvider';
 import { useSync } from '@/sync/SyncProvider';
 import { usePlayer } from '@/player/PlayerProvider';
-import { usePlayback } from '@/player/usePlayback';
+import { useActiveTrack } from '@/player/usePlayback';
 
 /** Vue courante de la bibliothèque. */
 type LibraryView = 'tracks' | 'artists' | 'albums' | 'playlists';
@@ -169,15 +172,85 @@ function LibraryContent({
 }) {
   const { tracks, artists, albums, trackSort, setTrackSort, refreshing, rescan } = library;
   const router = useRouter();
-  const { playQueue } = usePlayer();
-  const { track: activeTrack } = usePlayback();
+  const { playQueue, playNext, addToQueue } = usePlayer();
+  const { status: syncStatus, syncNow } = useSync();
+  const activeTrack = useActiveTrack();
+
+  // Pull-to-refresh unifié (passe UX) : le même geste voulait dire « re-scanner les fichiers »
+  // sur Morceaux/Artistes/Albums mais « synchroniser » sur Playlists — sémantique invisible.
+  // Désormais tirer = tout rafraîchir (re-scan incrémental + synchro), partout.
+  const refreshAll = useCallback(() => {
+    rescan();
+    void syncNow();
+  }, [rescan, syncNow]);
+  const pulling = refreshing || syncStatus === 'syncing';
+
+  // Mode sélection multiple (vue Morceaux) : `null` = mode normal. Entré via l'action
+  // « Sélectionner » du menu long-press, sorti par « Annuler » ou après une action réussie.
+  const [selection, setSelection] = useState<ReadonlySet<string> | null>(null);
+  // Pistes en attente dans le sélecteur de playlist (action groupée du mode sélection).
+  const [pickerTracks, setPickerTracks] = useState<LocalTrack[] | null>(null);
+
+  const startSelection = useCallback((track: LocalTrack) => setSelection(new Set([track.id])), []);
   // Menu d'actions (long-press) mutualisé : ouverture + feuilles rendues via `trackMenu.element`.
-  const trackMenu = useTrackActionsMenu();
+  const trackMenu = useTrackActionsMenu({ onSelect: startSelection });
 
   // Résultats filtrés par la recherche (temps réel). Requête vide = listes complètes.
   const filteredTracks = useMemo(() => filterTracks(tracks, query), [tracks, query]);
   const filteredArtists = useMemo(() => filterArtists(artists, query), [artists, query]);
   const filteredAlbums = useMemo(() => filterAlbums(albums, query), [albums, query]);
+
+  const toggleSelect = useCallback((track: LocalTrack) => {
+    setSelection((prev) => {
+      if (!prev) {
+        return prev;
+      }
+      const next = new Set(prev);
+      if (next.has(track.id)) {
+        next.delete(track.id);
+      } else {
+        next.add(track.id);
+      }
+      return next;
+    });
+  }, []);
+
+  const cancelSelection = useCallback(() => setSelection(null), []);
+
+  // Pistes sélectionnées dans l'ordre d'affichage courant (tri de la bibliothèque), pas dans
+  // l'ordre des taps : « Lire ensuite » sur 10 titres doit respecter l'ordre de la liste.
+  const selectedTracks = useMemo(
+    () => (selection ? tracks.filter((t) => selection.has(t.id)) : []),
+    [tracks, selection]
+  );
+
+  const playNextSelected = () => {
+    if (selectedTracks.length > 0) {
+      tapLight();
+      void playNext(selectedTracks);
+      showToast(
+        selectedTracks.length > 1
+          ? `${selectedTracks.length} titres liront ensuite`
+          : 'Lira ensuite',
+        'queue_music'
+      );
+      setSelection(null);
+    }
+  };
+
+  const addSelectedToQueue = () => {
+    if (selectedTracks.length > 0) {
+      tapLight();
+      void addToQueue(selectedTracks);
+      showToast(
+        selectedTracks.length > 1
+          ? `${selectedTracks.length} titres ajoutés à la file`
+          : 'Ajouté à la file',
+        'queue_music'
+      );
+      setSelection(null);
+    }
+  };
 
   // Handlers stables (référence conservée entre rendus) : condition pour que le `memo` des lignes
   // de liste soit effectif — une closure recréée à chaque rendu invaliderait toutes les lignes.
@@ -204,13 +277,20 @@ function LibraryContent({
         <TracksView
           tracks={filteredTracks}
           query={query}
-          activeId={activeTrack?.id}
+          activeId={activeTrack?.mediaId}
           sort={trackSort}
           onToggleSort={() => setTrackSort(nextSort(trackSort))}
           onPlay={playFromFiltered}
           onLongPress={trackMenu.open}
-          refreshing={refreshing}
-          onRefresh={rescan}
+          refreshing={pulling}
+          onRefresh={refreshAll}
+          selection={selection}
+          onToggleSelect={toggleSelect}
+          onSelectionChange={setSelection}
+          onCancelSelection={cancelSelection}
+          onAddSelectedToPlaylist={() => setPickerTracks(selectedTracks)}
+          onPlayNextSelected={playNextSelected}
+          onAddSelectedToQueue={addSelectedToQueue}
         />
       )}
       {view === 'artists' && (
@@ -218,8 +298,8 @@ function LibraryContent({
           artists={filteredArtists}
           query={query}
           onOpen={openArtist}
-          refreshing={refreshing}
-          onRefresh={rescan}
+          refreshing={pulling}
+          onRefresh={refreshAll}
         />
       )}
       {view === 'albums' && (
@@ -227,24 +307,40 @@ function LibraryContent({
           albums={filteredAlbums}
           query={query}
           onOpen={openAlbum}
-          refreshing={refreshing}
-          onRefresh={rescan}
+          refreshing={pulling}
+          onRefresh={refreshAll}
         />
       )}
-      {view === 'playlists' && <PlaylistsView query={query} />}
+      {view === 'playlists' && (
+        <PlaylistsView query={query} refreshing={pulling} onRefresh={refreshAll} />
+      )}
 
       {trackMenu.element}
+
+      {/* Sélecteur de playlist du mode sélection (multi-titres) : distinct de celui du menu
+          long-press (une seule piste), la sortie du mode ne se fait qu'après un ajout réussi. */}
+      <PlaylistPickerSheet
+        tracks={pickerTracks}
+        onClose={() => setPickerTracks(null)}
+        onAdded={cancelSelection}
+      />
     </>
   );
 }
 
 /** Vue Playlists : accès Favoris + liste des playlists (filtrable par nom) + création. */
-function PlaylistsView({ query }: { query: string }) {
+function PlaylistsView({
+  query,
+  refreshing,
+  onRefresh,
+}: {
+  query: string;
+  refreshing: boolean;
+  onRefresh: () => void;
+}) {
   const router = useRouter();
   const { playlists, createPlaylist } = usePlaylistsContext();
   const { favoriteIds } = useFavorites();
-  // Ici, tirer pour rafraîchir = synchroniser les playlists (pas re-scanner les fichiers).
-  const { status: syncStatus, syncNow } = useSync();
   const [creating, setCreating] = useState(false);
 
   // Filtre sur le nom (même repli d'accents que le reste de la recherche).
@@ -262,13 +358,14 @@ function PlaylistsView({ query }: { query: string }) {
       <FlatList
         data={filtered}
         keyExtractor={(playlist) => playlist.id}
-        refreshControl={themedRefresh(syncStatus === 'syncing', () => void syncNow())}
+        refreshControl={themedRefresh(refreshing, onRefresh)}
         // Pendant une recherche, on masque Favoris + création pour ne montrer que les résultats.
         ListHeaderComponent={
           isSearching ? null : (
             <>
               <Pressable
                 onPress={() => router.push('/favorites')}
+                android_ripple={{ color: colors.borderStrong }}
                 style={({ pressed }) => [styles.playlistRow, pressed && styles.rowPressed]}
                 accessibilityRole="button"
                 accessibilityLabel="Favoris"
@@ -299,6 +396,7 @@ function PlaylistsView({ query }: { query: string }) {
         renderItem={({ item }) => (
           <Pressable
             onPress={() => router.push({ pathname: '/playlist', params: { id: item.id } })}
+            android_ripple={{ color: colors.borderStrong }}
             style={({ pressed }) => [styles.playlistRow, pressed && styles.rowPressed]}
             accessibilityRole="button"
             accessibilityLabel={`Playlist ${item.name}`}
@@ -342,7 +440,7 @@ function PlaylistsView({ query }: { query: string }) {
 
 const trackKey = (track: LocalTrack) => track.id;
 
-/** Vue Morceaux : barre de tri + liste virtualisée. */
+/** Vue Morceaux : barre de tri + liste virtualisée, avec un mode sélection multiple. */
 function TracksView({
   tracks,
   query,
@@ -353,6 +451,13 @@ function TracksView({
   onLongPress,
   refreshing,
   onRefresh,
+  selection,
+  onToggleSelect,
+  onSelectionChange,
+  onCancelSelection,
+  onAddSelectedToPlaylist,
+  onPlayNextSelected,
+  onAddSelectedToQueue,
 }: {
   tracks: LocalTrack[];
   query: string;
@@ -363,7 +468,17 @@ function TracksView({
   onLongPress: (track: LocalTrack) => void;
   refreshing: boolean;
   onRefresh: () => void;
+  /** Ids sélectionnés, ou `null` hors mode sélection. */
+  selection: ReadonlySet<string> | null;
+  onToggleSelect: (track: LocalTrack) => void;
+  onSelectionChange: (next: ReadonlySet<string>) => void;
+  onCancelSelection: () => void;
+  onAddSelectedToPlaylist: () => void;
+  onPlayNextSelected: () => void;
+  onAddSelectedToQueue: () => void;
 }) {
+  const selectionMode = selection !== null;
+
   const renderItem = useCallback(
     ({ item, index }: { item: LocalTrack; index: number }) => (
       <TrackIndexRow
@@ -371,17 +486,67 @@ function TracksView({
         index={index}
         isActive={item.id === activeId}
         onPlay={onPlay}
-        onLongPress={onLongPress}
+        onLongPress={selectionMode ? undefined : onLongPress}
+        selectionMode={selectionMode}
+        selected={selection?.has(item.id) ?? false}
+        onToggleSelect={onToggleSelect}
       />
     ),
-    [activeId, onPlay, onLongPress]
+    [activeId, onPlay, onLongPress, selectionMode, selection, onToggleSelect]
   );
+
+  // « Tout » porte sur la liste affichée (donc filtrée) ; re-tap = tout désélectionner.
+  const allVisibleSelected =
+    selectionMode && tracks.length > 0 && tracks.every((t) => selection.has(t.id));
+  const toggleAllVisible = () => {
+    if (!selectionMode) {
+      return;
+    }
+    const next = new Set(selection);
+    if (allVisibleSelected) {
+      for (const t of tracks) {
+        next.delete(t.id);
+      }
+    } else {
+      for (const t of tracks) {
+        next.add(t.id);
+      }
+    }
+    onSelectionChange(next);
+  };
+
+  const count = selection?.size ?? 0;
 
   return (
     <>
       {/* Barre de tri hors liste : hauteur d'items constante → `getItemLayout` exact. On la masque
-          quand une recherche ne renvoie rien (seul le message reste). */}
-      {!(query && tracks.length === 0) && <SortBar sort={sort} onToggle={onToggleSort} />}
+          quand une recherche ne renvoie rien (seul le message reste). En mode sélection, elle cède
+          la place à la barre de sélection (compteur + Tout + Annuler). */}
+      {selectionMode ? (
+        <View style={styles.selectionBar}>
+          <Text style={styles.selectionCount}>
+            {count} sélectionné{count > 1 ? 's' : ''}
+          </Text>
+          <Pressable
+            onPress={toggleAllVisible}
+            hitSlop={8}
+            style={styles.selectionAction}
+            accessibilityRole="button"
+          >
+            <Text style={styles.selectionActionLabel}>{allVisibleSelected ? 'Aucun' : 'Tout'}</Text>
+          </Pressable>
+          <Pressable
+            onPress={onCancelSelection}
+            hitSlop={8}
+            style={styles.selectionAction}
+            accessibilityRole="button"
+          >
+            <Text style={styles.selectionActionLabel}>Annuler</Text>
+          </Pressable>
+        </View>
+      ) : (
+        !(query && tracks.length === 0) && <SortBar sort={sort} onToggle={onToggleSort} />
+      )}
       <FlatList
         data={tracks}
         keyExtractor={trackKey}
@@ -390,12 +555,65 @@ function TracksView({
         windowSize={7}
         initialNumToRender={12}
         maxToRenderPerBatch={16}
-        refreshControl={themedRefresh(refreshing, onRefresh)}
+        refreshControl={selectionMode ? undefined : themedRefresh(refreshing, onRefresh)}
         ListEmptyComponent={query ? <NoResults query={query} /> : null}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
       />
+      {selectionMode && (
+        <View style={styles.selectionFooter}>
+          <SelectionFooterAction
+            icon="playlist_add_check"
+            label="Playlist"
+            disabled={count === 0}
+            onPress={onAddSelectedToPlaylist}
+          />
+          <SelectionFooterAction
+            icon="playlist_play"
+            label="Lire ensuite"
+            disabled={count === 0}
+            onPress={onPlayNextSelected}
+          />
+          <SelectionFooterAction
+            icon="playlist_add"
+            label="File"
+            disabled={count === 0}
+            onPress={onAddSelectedToQueue}
+          />
+        </View>
+      )}
     </>
+  );
+}
+
+/** Action de la barre du mode sélection (icône + libellé court, désactivée si sélection vide). */
+function SelectionFooterAction({
+  icon,
+  label,
+  disabled,
+  onPress,
+}: {
+  icon: IconName;
+  label: string;
+  disabled: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      style={({ pressed }) => [
+        styles.selectionFooterAction,
+        pressed && styles.rowPressed,
+        disabled && styles.selectionFooterDisabled,
+      ]}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled }}
+    >
+      <Icon name={icon} size={22} color={colors.accentIcon} />
+      <Text style={styles.selectionFooterLabel}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -430,6 +648,7 @@ const ArtistRow = memo(function ArtistRow({
   return (
     <Pressable
       onPress={() => onOpen(artist.name)}
+      android_ripple={{ color: colors.borderStrong }}
       style={({ pressed }) => [styles.artistRow, pressed && styles.rowPressed]}
       accessibilityRole="button"
       accessibilityLabel={`Artiste ${artist.name}`}
@@ -730,6 +949,48 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xxl,
     paddingTop: spacing.md,
     paddingBottom: spacing.sm,
+  },
+  selectionBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.lg,
+    paddingHorizontal: spacing.xxl,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.sm,
+  },
+  selectionCount: {
+    ...typography.heading,
+    fontSize: 14,
+    flex: 1,
+  },
+  selectionAction: {
+    paddingVertical: spacing.xs,
+  },
+  selectionActionLabel: {
+    fontFamily: typography.heading.fontFamily,
+    fontSize: 13,
+    color: colors.accentLabel,
+  },
+  selectionFooter: {
+    flexDirection: 'row',
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  selectionFooterAction: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    paddingVertical: spacing.md,
+  },
+  selectionFooterDisabled: {
+    opacity: 0.4,
+  },
+  selectionFooterLabel: {
+    ...typography.body,
+    fontSize: 11.5,
+    color: colors.textSecondary,
   },
   sortLabel: {
     ...typography.body,

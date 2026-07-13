@@ -12,7 +12,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { RepeatMode } from 'react-native-track-player';
+import { RepeatMode } from '@rntp/player';
 
 import { colors, coverFallback, coverGradient, radii, spacing, typography } from '@/theme';
 import { Icon } from '@/components/Icon';
@@ -23,14 +23,7 @@ import { TrackActionsSheet } from '@/components/TrackActionsSheet';
 import { PlaylistPickerSheet } from '@/components/PlaylistPickerSheet';
 import { usePlayer, usePlaybackMode, useQueue } from '@/player/PlayerProvider';
 import { usePlayback } from '@/player/usePlayback';
-import {
-  clearSleepTimer,
-  getSleepTimer,
-  sleepAtEndOfTrack,
-  startSleepTimer,
-  subscribeSleepTimer,
-  type SleepTimerState,
-} from '@/player/sleepTimer';
+import { useSleepTimer, type SleepTimerInfo } from '@/player/useSleepTimer';
 import { useLibrary } from '@/library/LibraryProvider';
 import { useFavorites } from '@/library/FavoritesProvider';
 import { confirmRestoreTags } from '@/library/writeTags';
@@ -38,12 +31,12 @@ import * as db from '@/library/db';
 import { tapLight, tapMedium } from '@/lib/haptics';
 
 /** Libellé court du minuteur (compte à rebours ou fin de piste), ou `null` si inactif. */
-function sleepTimerLabel(timer: SleepTimerState): string | null {
-  if (timer.mode === 'deadline') {
-    const minutes = Math.max(1, Math.ceil((timer.endAt - Date.now()) / 60_000));
+function sleepTimerLabel(timer: SleepTimerInfo | null): string | null {
+  if (timer?.type === 'time') {
+    const minutes = Math.max(1, Math.ceil(timer.remainingSeconds / 60));
     return `${minutes} min`;
   }
-  if (timer.mode === 'end-of-track') {
+  if (timer?.type === 'mediaItem') {
     return 'fin de piste';
   }
   return null;
@@ -71,10 +64,13 @@ export default function NowPlayingScreen() {
   const { tracksById, setTrackExcluded, reloadTracks } = useLibrary();
   const { isFavorite, toggleFavorite } = useFavorites();
 
-  // Minuteur de sommeil : état du store partagé avec le service (cf. sleepTimer.ts). Le compte à
-  // rebours affiché se rafraîchit « gratuitement » via les re-rendus de progression (250 ms).
-  const [sleepTimer, setSleepTimer] = useState<SleepTimerState>(getSleepTimer);
-  useEffect(() => subscribeSleepTimer(setSleepTimer), []);
+  // Minuteur de sommeil natif (compte à rebours sondé à 1 s, cf. useSleepTimer.ts).
+  const {
+    timer: sleepTimer,
+    startAfterMinutes,
+    stopAtEndOfTrack,
+    cancel: cancelSleepTimer,
+  } = useSleepTimer();
   const [timerSheetOpen, setTimerSheetOpen] = useState(false);
 
   // « À suivre » : piste suivante de la file (boucle sur la première en répétition de file).
@@ -85,11 +81,11 @@ export default function NowPlayingScreen() {
     if (activeIndex + 1 < queueTracks.length) {
       return queueTracks[activeIndex + 1];
     }
-    return repeatMode === RepeatMode.Queue && queueTracks.length > 1 ? queueTracks[0] : null;
+    return repeatMode === RepeatMode.All && queueTracks.length > 1 ? queueTracks[0] : null;
   }, [queueTracks, activeIndex, repeatMode]);
 
   // Piste locale correspondant à la lecture en cours (pour favori + menu d'actions).
-  const local = track ? (tracksById.get(String(track.id)) ?? null) : null;
+  const local = track?.mediaId ? (tracksById.get(track.mediaId) ?? null) : null;
   const liked = local ? isFavorite(local.id) : false;
 
   // Menu « … » (réutilise le bottom sheet d'actions de la bibliothèque) + sélecteur de playlist.
@@ -113,9 +109,9 @@ export default function NowPlayingScreen() {
   // Le PanResponder n'est créé qu'une fois ; il lit largeur/durée/callback via une ref mise à
   // jour hors rendu (effet), pour ne pas recréer le responder en plein geste et éviter des
   // closures périmées quand la piste (durée) change.
-  const seekRef = useRef({ barWidth, duration, seekTo, trackId: track?.id as unknown });
+  const seekRef = useRef({ barWidth, duration, seekTo, trackId: track?.mediaId as unknown });
   useEffect(() => {
-    seekRef.current = { barWidth, duration, seekTo, trackId: track?.id };
+    seekRef.current = { barWidth, duration, seekTo, trackId: track?.mediaId };
   });
 
   // Entrée de l'écran : léger fondu + montée (motion design, API Animated du cœur RN).
@@ -280,7 +276,7 @@ export default function NowPlayingScreen() {
   // pas besoin de timer (le filet de sécurité 3 s est posé au lâcher, cf. le responder).
   if (
     pendingSeek !== null &&
-    (pendingSeek.trackId !== track?.id || Math.abs(position - pendingSeek.target) < 1.5)
+    (pendingSeek.trackId !== track?.mediaId || Math.abs(position - pendingSeek.target) < 1.5)
   ) {
     setPendingSeek(null);
   }
@@ -296,15 +292,15 @@ export default function NowPlayingScreen() {
   const remaining = duration > 0 ? Math.max(0, duration - displayPosition) : 0;
   const title = track?.title ?? 'Aucune lecture';
   const artist = track?.artist ?? '—';
-  const artwork = typeof track?.artwork === 'string' ? track.artwork : null;
+  const artwork = typeof track?.artworkUrl === 'string' ? track.artworkUrl : null;
 
-  // Répétition : couleur active hors « Off », icône « une piste » en mode Track.
+  // Répétition : couleur active hors « Off », icône « une piste » en mode One.
   const repeatActive = repeatMode !== RepeatMode.Off;
-  const repeatIcon = repeatMode === RepeatMode.Track ? 'repeat_one' : 'repeat';
+  const repeatIcon = repeatMode === RepeatMode.One ? 'repeat_one' : 'repeat';
   const repeatLabel =
     repeatMode === RepeatMode.Off
       ? 'Répétition désactivée'
-      : repeatMode === RepeatMode.Track
+      : repeatMode === RepeatMode.One
         ? 'Répéter la piste'
         : 'Répéter la file';
 
@@ -503,7 +499,7 @@ export default function NowPlayingScreen() {
           style={styles.timerButton}
           accessibilityRole="button"
           accessibilityLabel={
-            sleepTimer.mode === 'off'
+            sleepTimer === null
               ? 'Minuteur de sommeil'
               : `Minuteur de sommeil actif, ${sleepTimerLabel(sleepTimer)}`
           }
@@ -511,9 +507,9 @@ export default function NowPlayingScreen() {
           <Icon
             name="timer"
             size={22}
-            color={sleepTimer.mode === 'off' ? colors.textSecondary : colors.accent}
+            color={sleepTimer === null ? colors.textSecondary : colors.accent}
           />
-          {sleepTimer.mode !== 'off' && (
+          {sleepTimer !== null && (
             <Text style={styles.timerLabel}>{sleepTimerLabel(sleepTimer)}</Text>
           )}
         </Pressable>
@@ -553,7 +549,7 @@ export default function NowPlayingScreen() {
             key={minutes}
             onPress={() => {
               tapLight();
-              startSleepTimer(minutes);
+              startAfterMinutes(minutes);
               setTimerSheetOpen(false);
               showToast(`Lecture coupée dans ${minutes} min`, 'timer');
             }}
@@ -568,7 +564,7 @@ export default function NowPlayingScreen() {
         <Pressable
           onPress={() => {
             tapLight();
-            sleepAtEndOfTrack();
+            stopAtEndOfTrack();
             setTimerSheetOpen(false);
             showToast('Lecture coupée à la fin de la piste', 'timer');
           }}
@@ -579,11 +575,11 @@ export default function NowPlayingScreen() {
           <Icon name="music_off" size={22} color={colors.textSecondary} />
           <Text style={styles.sheetRowLabel}>À la fin de la piste</Text>
         </Pressable>
-        {sleepTimer.mode !== 'off' && (
+        {sleepTimer !== null && (
           <Pressable
             onPress={() => {
               tapLight();
-              clearSleepTimer();
+              cancelSleepTimer();
               setTimerSheetOpen(false);
               showToast('Minuteur désactivé', 'timer');
             }}
@@ -622,6 +618,9 @@ export default function NowPlayingScreen() {
         onLinkAlbum={() =>
           local && router.push({ pathname: '/identify-album', params: { trackId: local.id } })
         }
+        onEditArtists={() =>
+          local && router.push({ pathname: '/edit-artists', params: { trackId: local.id } })
+        }
         onWriteToFile={() =>
           local && router.push({ pathname: '/write-tags', params: { trackId: local.id } })
         }
@@ -630,7 +629,10 @@ export default function NowPlayingScreen() {
         onExclude={() => local && setTrackExcluded(local.id, true)}
       />
 
-      <PlaylistPickerSheet track={pickerOpen ? local : null} onClose={() => setPickerOpen(false)} />
+      <PlaylistPickerSheet
+        tracks={pickerOpen && local ? [local] : null}
+        onClose={() => setPickerOpen(false)}
+      />
 
       {/* Modal natif : le host racine ne passe pas au-dessus, on monte le nôtre (cf. Toast.tsx). */}
       <ToastHost variant="modal" />

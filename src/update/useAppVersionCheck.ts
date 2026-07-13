@@ -24,8 +24,10 @@ export function useAppVersionCheck(): AppVersionCheckResult {
   // l'app n'y est de toute façon pas distribuée — état final direct, pas de setState en cascade.
   const [result, setResult] = useState<AppVersionCheckResult>(() => {
     const current = Application.nativeApplicationVersion;
+    // Build dev (__DEV__ vrai en debug) : appli distincte de la prod (applicationId .dev),
+    // elle ne doit pas proposer de « mettre à jour » vers l'APK de prod publié.
     return {
-      status: current ? 'checking' : 'up-to-date',
+      status: current && !__DEV__ ? 'checking' : 'up-to-date',
       currentVersion: current,
       latestVersion: null,
       downloadUrl: null,
@@ -34,7 +36,7 @@ export function useAppVersionCheck(): AppVersionCheckResult {
 
   useEffect(() => {
     const current = Application.nativeApplicationVersion;
-    if (!current) {
+    if (!current || __DEV__) {
       return;
     }
 

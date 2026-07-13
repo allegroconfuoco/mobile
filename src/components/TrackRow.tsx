@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { colors, spacing, typography } from '@/theme';
+import { colors, radii, spacing, typography } from '@/theme';
 import { Icon } from '@/components/Icon';
 import { TrackCover } from '@/components/TrackCover';
 import type { LocalTrack } from '@/library/useAudioLibrary';
@@ -40,6 +40,14 @@ type TrackRowProps = {
   leadingNumber?: number | null;
   /** Sous-titre custom ; par défaut « artiste · album ». */
   subtitle?: string;
+  /**
+   * Mode sélection multiple : la durée cède la place à une checkbox et le tap coche/décoche
+   * (le handler `onPress` fourni par l'appelant porte alors la bascule). Props primitives pour
+   * préserver le `memo` ; la hauteur de ligne (`TRACK_ROW_HEIGHT`) ne change pas.
+   */
+  selectionMode?: boolean;
+  /** Piste cochée (mode sélection). */
+  selected?: boolean;
 };
 
 /**
@@ -57,6 +65,8 @@ export const TrackRow = memo(function TrackRow({
   onLongPress,
   leadingNumber,
   subtitle,
+  selectionMode = false,
+  selected = false,
 }: TrackRowProps) {
   const meta = subtitle ?? defaultSubtitle(track);
   const showNumber = leadingNumber !== undefined;
@@ -64,13 +74,19 @@ export const TrackRow = memo(function TrackRow({
   return (
     <Pressable
       onPress={onPress}
-      onLongPress={onLongPress}
+      onLongPress={selectionMode ? undefined : onLongPress}
       delayLongPress={300}
+      // Ripple natif : feedback dès le touch-down (zéro JS), en plus du fond `pressed`.
+      android_ripple={{ color: colors.borderStrong }}
       style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-      accessibilityRole="button"
-      accessibilityState={isActive ? { selected: true } : {}}
-      accessibilityLabel={`Lire ${track.title}`}
-      accessibilityHint={onLongPress ? 'Appui long pour ajouter à la file' : undefined}
+      accessibilityRole={selectionMode ? 'checkbox' : 'button'}
+      accessibilityState={
+        selectionMode ? { checked: selected } : isActive ? { selected: true } : {}
+      }
+      accessibilityLabel={selectionMode ? track.title : `Lire ${track.title}`}
+      accessibilityHint={
+        onLongPress && !selectionMode ? 'Appui long pour ajouter à la file' : undefined
+      }
     >
       {showNumber ? (
         <View style={styles.numberBox}>
@@ -96,7 +112,11 @@ export const TrackRow = memo(function TrackRow({
           </Text>
         )}
       </View>
-      {isActive && !showNumber ? (
+      {selectionMode ? (
+        <View style={[styles.checkbox, selected && styles.checkboxOn]}>
+          {selected && <Icon name="check" size={16} color={colors.onAccent} />}
+        </View>
+      ) : isActive && !showNumber ? (
         <Icon name="graphic_eq" size={20} color={colors.accentIcon} />
       ) : (
         <Text style={styles.duration}>{formatDuration(track.durationMs)}</Text>
@@ -114,6 +134,10 @@ type TrackIndexRowProps = {
   onLongPress?: (track: LocalTrack) => void;
   leadingNumber?: number | null;
   subtitle?: string;
+  /** Mode sélection multiple : le tap bascule la coche (`onToggleSelect`) au lieu de lire. */
+  selectionMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (track: LocalTrack) => void;
 };
 
 /**
@@ -129,15 +153,20 @@ export const TrackIndexRow = memo(function TrackIndexRow({
   onLongPress,
   leadingNumber,
   subtitle,
+  selectionMode = false,
+  selected = false,
+  onToggleSelect,
 }: TrackIndexRowProps) {
   return (
     <TrackRow
       track={track}
       isActive={isActive}
-      onPress={() => onPlay(index)}
+      onPress={selectionMode && onToggleSelect ? () => onToggleSelect(track) : () => onPlay(index)}
       onLongPress={onLongPress ? () => onLongPress(track) : undefined}
       leadingNumber={leadingNumber}
       subtitle={subtitle}
+      selectionMode={selectionMode}
+      selected={selected}
     />
   );
 });
@@ -188,6 +217,19 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.textMuted,
     fontVariant: ['tabular-nums'],
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: radii.sm,
+    borderWidth: 2,
+    borderColor: colors.borderStrong,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxOn: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
   },
 });
 

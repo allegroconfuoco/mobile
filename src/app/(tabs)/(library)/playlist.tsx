@@ -11,13 +11,14 @@ import { showToast } from '@/components/Toast';
 import { tapMedium } from '@/lib/haptics';
 import { DraggableTrackList, type DraggableTrackItem } from '@/components/DraggableTrackList';
 import { PlaylistNameDialog } from '@/components/PlaylistNameDialog';
+import { QuickActionsSheet } from '@/components/QuickActionsSheet';
 import { useTrackActionsMenu } from '@/components/useTrackActionsMenu';
 import { UNKNOWN_ARTIST } from '@/library/grouping';
 import { useLibrary } from '@/library/LibraryProvider';
 import { usePlaylistsContext } from '@/library/PlaylistsProvider';
 import type { LocalTrack } from '@/library/useAudioLibrary';
 import { usePlayer } from '@/player/PlayerProvider';
-import { usePlayback } from '@/player/usePlayback';
+import { useActiveTrack } from '@/player/usePlayback';
 
 function arrayMove<T>(list: T[], from: number, to: number): T[] {
   const next = list.slice();
@@ -53,10 +54,11 @@ export default function PlaylistScreen() {
     deletePlaylist,
   } = usePlaylistsContext();
   const { playQueue } = usePlayer();
-  const { track: activeTrack } = usePlayback();
+  const activeTrack = useActiveTrack();
   const trackMenu = useTrackActionsMenu();
 
   const [renaming, setRenaming] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const playlist = playlists.find((p) => p.id === id);
   const name = playlist?.name ?? 'Playlist';
@@ -96,8 +98,8 @@ export default function PlaylistScreen() {
 
   // Id partagé de la piste en cours de lecture (le lecteur raisonne en id media-store).
   const activeSharedId = useMemo(
-    () => entries.find((e) => e.localTrack?.id === activeTrack?.id)?.entry.sharedTrackId,
-    [entries, activeTrack?.id]
+    () => entries.find((e) => e.localTrack?.id === activeTrack?.mediaId)?.entry.sharedTrackId,
+    [entries, activeTrack?.mediaId]
   );
 
   // Lance la playlist à partir d'une entrée : ignore les indisponibles, démarre la file sur les
@@ -129,37 +131,26 @@ export default function PlaylistScreen() {
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + spacing.sm }]}>
+      {/* Même motif d'en-tête que album/artiste (passe UX) : action primaire + un « … » qui
+          regroupe le reste dans une QuickActionsSheet, au lieu d'une rangée d'icônes. */}
       <View style={styles.topBar}>
         <BackButton onPress={() => router.back()} />
         <View style={styles.topActions}>
           <Pressable
-            onPress={() =>
-              router.push({
-                pathname: '/write-tags',
-                params: { scope: 'playlist', playlistId: id, label: name },
-              })
-            }
+            onPress={() => router.push({ pathname: '/playlist-add', params: { id } })}
             hitSlop={12}
             accessibilityRole="button"
-            accessibilityLabel="Écrire les titres de la playlist dans les fichiers"
+            accessibilityLabel="Ajouter des titres"
           >
-            <Icon name="save" size={24} color={colors.textPrimary} />
+            <Icon name="add" size={26} color={colors.textPrimary} />
           </Pressable>
           <Pressable
-            onPress={() => setRenaming(true)}
+            onPress={() => setMenuOpen(true)}
             hitSlop={12}
             accessibilityRole="button"
-            accessibilityLabel="Renommer la playlist"
+            accessibilityLabel="Plus d’actions"
           >
-            <Icon name="edit" size={24} color={colors.textPrimary} />
-          </Pressable>
-          <Pressable
-            onPress={confirmDelete}
-            hitSlop={12}
-            accessibilityRole="button"
-            accessibilityLabel="Supprimer la playlist"
-          >
-            <Icon name="delete" size={24} color={colors.textPrimary} />
+            <Icon name="more_horiz" size={26} color={colors.textPrimary} />
           </Pressable>
         </View>
       </View>
@@ -190,9 +181,16 @@ export default function PlaylistScreen() {
       {count === 0 ? (
         <View style={styles.centered}>
           <Icon name="queue_music" size={40} color={colors.textMuted} />
-          <Text style={styles.emptyText}>
-            Playlist vide. Ajoutez des morceaux depuis la bibliothèque (appui long sur une piste).
-          </Text>
+          <Text style={styles.emptyText}>Playlist vide.</Text>
+          <Pressable
+            onPress={() => router.push({ pathname: '/playlist-add', params: { id } })}
+            style={({ pressed }) => [styles.emptyAddButton, pressed && styles.emptyAddPressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Ajouter des titres"
+          >
+            <Icon name="add" size={20} color={colors.onAccent} />
+            <Text style={styles.emptyAddLabel}>Ajouter des titres</Text>
+          </Pressable>
         </View>
       ) : (
         <DraggableTrackList
@@ -227,6 +225,26 @@ export default function PlaylistScreen() {
         submitLabel="Renommer"
         onSubmit={(newName) => renamePlaylist(id, newName)}
         onClose={() => setRenaming(false)}
+      />
+
+      <QuickActionsSheet
+        visible={menuOpen}
+        title={name}
+        onClose={() => setMenuOpen(false)}
+        actions={[
+          { icon: 'edit', label: 'Renommer', onPress: () => setRenaming(true) },
+          {
+            icon: 'save',
+            label: 'Écrire les tags dans les fichiers',
+            onPress: () =>
+              router.push({
+                pathname: '/write-tags',
+                params: { scope: 'playlist', playlistId: id, label: name },
+              }),
+          },
+          // Destructive en dernier, comme sur les autres écrans.
+          { icon: 'delete', label: 'Supprimer la playlist', onPress: confirmDelete },
+        ]}
       />
 
       {trackMenu.element}
@@ -295,5 +313,22 @@ const styles = StyleSheet.create({
   emptyText: {
     ...typography.body,
     textAlign: 'center',
+  },
+  emptyAddButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.accent,
+    borderRadius: radii.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xl,
+  },
+  emptyAddPressed: {
+    opacity: 0.7,
+  },
+  emptyAddLabel: {
+    ...typography.heading,
+    fontSize: 15,
+    color: colors.onAccent,
   },
 });

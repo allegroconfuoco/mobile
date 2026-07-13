@@ -11,36 +11,48 @@ import { usePlaylistsContext } from '@/library/PlaylistsProvider';
 import type { LocalTrack } from '@/library/useAudioLibrary';
 
 /**
- * Feuille basse « Ajouter à une playlist », ouverte depuis le menu long-press d'une piste.
+ * Feuille basse « Ajouter à une playlist », ouverte depuis le menu long-press d'une piste ou le
+ * mode sélection de la bibliothèque (multi-titres).
  *
  * Liste les playlists existantes (+ une entrée « Nouvelle playlist » qui ouvre le dialogue de nom).
- * Choisir une playlist y ajoute la piste puis referme. Consomme directement `usePlaylistsContext`
- * pour garder l'écran appelant mince.
+ * Choisir une playlist y ajoute les pistes puis referme. Consomme directement `usePlaylistsContext`
+ * pour garder l'écran appelant mince ; `db.addTracksToPlaylist` est déjà batch (dédup comprise).
  */
 export type PlaylistPickerSheetProps = {
-  /** Piste à ajouter, ou `null` pour garder la feuille fermée. */
-  track: LocalTrack | null;
+  /** Pistes à ajouter, ou `null` pour garder la feuille fermée. */
+  tracks: LocalTrack[] | null;
   onClose: () => void;
+  /** Appelé après un ajout réussi (pas sur simple fermeture) — ex. sortir du mode sélection. */
+  onAdded?: () => void;
 };
 
-export function PlaylistPickerSheet({ track, onClose }: PlaylistPickerSheetProps) {
+export function PlaylistPickerSheet({ tracks, onClose, onAdded }: PlaylistPickerSheetProps) {
   const { playlists, createPlaylist, addTracksToPlaylist } = usePlaylistsContext();
   const [creating, setCreating] = useState(false);
 
-  const visible = track !== null;
+  const visible = tracks !== null && tracks.length > 0;
 
   const addTo = (playlistId: string, playlistName: string) => {
-    if (track) {
-      addTracksToPlaylist(playlistId, [track.id]);
+    if (tracks && tracks.length > 0) {
+      addTracksToPlaylist(
+        playlistId,
+        tracks.map((t) => t.id)
+      );
       tapLight();
-      showToast(`Ajouté à « ${playlistName} »`, 'playlist_add_check');
+      showToast(
+        tracks.length > 1
+          ? `${tracks.length} titres ajoutés à « ${playlistName} »`
+          : `Ajouté à « ${playlistName} »`,
+        'playlist_add_check'
+      );
+      onAdded?.();
     }
     onClose();
   };
 
   const createAndAdd = (name: string) => {
     const id = createPlaylist(name);
-    // La piste est capturée avant fermeture : `addTo` referme aussi la feuille.
+    // Les pistes sont capturées avant fermeture : `addTo` referme aussi la feuille.
     addTo(id, name);
   };
 
@@ -53,6 +65,7 @@ export function PlaylistPickerSheet({ track, onClose }: PlaylistPickerSheetProps
 
         <Pressable
           onPress={() => setCreating(true)}
+          android_ripple={{ color: colors.borderStrong }}
           style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
           accessibilityRole="button"
           accessibilityLabel="Nouvelle playlist"
@@ -66,6 +79,7 @@ export function PlaylistPickerSheet({ track, onClose }: PlaylistPickerSheetProps
             <Pressable
               key={p.id}
               onPress={() => addTo(p.id, p.name)}
+              android_ripple={{ color: colors.borderStrong }}
               style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
               accessibilityRole="button"
               accessibilityLabel={`Ajouter à ${p.name}`}

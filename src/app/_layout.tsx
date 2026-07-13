@@ -32,9 +32,9 @@ import { UpdateModal } from '@/update/UpdateModal';
 // Garde le splash affiché tant que les polices ET la session ne sont pas prêtes.
 SplashScreen.preventAutoHideAsync();
 
-// Ancre de la pile pour les deep links (ex. tap sur la notification média → `/now-playing`, cf.
-// `+native-intent.ts`) : au lancement à froid, `(tabs)` est monté SOUS l'écran ciblé, sinon le
-// modal Lecture serait seul dans la pile et « retour » sortirait de l'app.
+// Ancre de la pile pour les deep links : au lancement à froid sur un écran ciblé, `(tabs)` est
+// monté SOUS lui, sinon cet écran serait seul dans la pile et « retour » sortirait de l'app.
+// (La notification média v5 ouvre l'app par un simple launch intent, sans deep link.)
 export const unstable_settings = {
   initialRouteName: '(tabs)',
 };
@@ -96,7 +96,7 @@ function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
     }
   }, [ready]);
 
-  // Erreurs de lecture (relayées par le service RNTP, cf. playbackErrors) → toast au premier plan.
+  // Erreurs de lecture (relayées par les événements lecteur, cf. playbackErrors) → toast au premier plan.
   useEffect(() => subscribePlaybackError((e) => showToast(e.message, 'music_off')), []);
 
   // Splash visible tant que polices/session ne sont pas prêtes.

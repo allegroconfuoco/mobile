@@ -46,6 +46,7 @@ export type IconName =
   | 'drag_indicator'
   | 'playlist_add'
   | 'playlist_play'
+  | 'checklist'
   | 'folder'
   | 'block'
   | 'add'

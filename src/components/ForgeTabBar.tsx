@@ -56,6 +56,8 @@ export function ForgeTabBar({ state, descriptors, navigation }: BottomTabBarProp
             <Pressable
               key={route.key}
               onPress={onPress}
+              // Ripple natif : feedback dès le touch-down, sans aller-retour JS.
+              android_ripple={{ color: colors.borderStrong }}
               style={[styles.tab, isFocused && styles.tabActive]}
               accessibilityRole="button"
               accessibilityState={isFocused ? { selected: true } : {}}

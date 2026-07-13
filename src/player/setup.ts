@@ -1,86 +1,58 @@
 import { Platform } from 'react-native';
-import TrackPlayer, { AppKilledPlaybackBehavior, Capability } from 'react-native-track-player';
+import TrackPlayer, { PlayerCommand } from '@rntp/player';
+
+import { wireForegroundPlayerEvents } from './playerEvents';
 
 /**
- * Initialisation du lecteur.
+ * Initialisation du lecteur (@rntp/player v5).
  *
- * `setupPlayer` / `updateOptions` ne doivent être appelés qu'une seule fois. On mémorise donc
- * la promesse : les appels concurrents (montage du provider, premier tap sur une piste) la
- * partagent, et on ne relance pas l'init une fois qu'elle a réussi. En cas d'échec, on relâche
- * la promesse pour autoriser une nouvelle tentative.
+ * `setupPlayer` est synchrone et ne doit être appelé qu'une fois : on mémorise l'état dans un
+ * flag de module. Un rechargement à chaud peut ré-exécuter ce module alors que le natif est déjà
+ * prêt : la lib lève alors une erreur « already set up » qu'on avale (le lecteur est utilisable).
  */
 
 // Pas de lecteur natif sur le web : l'init est court-circuitée (cf. bibliothèque « unsupported »).
 const isSupported = Platform.OS !== 'web';
 
-let setupPromise: Promise<boolean> | null = null;
+let ready = false;
 
-/** Configure le lecteur si besoin ; résout `true` quand il est prêt, `false` si non supporté. */
-export function ensurePlayerReady(): Promise<boolean> {
-  if (!setupPromise) {
-    setupPromise = runSetup();
-  }
-  return setupPromise;
-}
-
-async function runSetup(): Promise<boolean> {
+/** Configure le lecteur si besoin ; `true` quand il est prêt, `false` si non supporté. */
+export function ensurePlayerReady(): boolean {
   if (!isSupported) {
     return false;
   }
+  if (ready) {
+    return true;
+  }
 
   try {
-    await setupWithBackgroundRetry();
+    TrackPlayer.setupPlayer({
+      // Le tick `PlaybackProgressUpdated` (1 s) n'existe que si progressSync est configuré ;
+      // sans URL http, aucun POST ne part — on ne veut que l'événement, pour l'historique
+      // d'écoute (#25) et le suivi de position du handoff.
+      progressSync: { intervalSeconds: 1 },
+    });
   } catch (e) {
-    // Un second `setupPlayer` (ex. rechargement à chaud) lève « already initialized » :
-    // le lecteur est en réalité prêt, on continue. Toute autre erreur est un vrai échec.
-    if ((e as { code?: string }).code !== 'player_already_initialized') {
-      console.warn('[player] setup échoué', e);
-      setupPromise = null;
-      return false;
-    }
+    // Double init (rechargement à chaud) : le natif est déjà prêt, on continue.
+    console.warn('[player] setupPlayer', e);
   }
 
-  await TrackPlayer.updateOptions({
-    android: {
-      // La musique continue quand l'app est tuée : c'est un lecteur, pas une appli au premier plan.
-      appKilledPlaybackBehavior: AppKilledPlaybackBehavior.ContinuePlayback,
-    },
+  // Boutons de la notification / écran verrouillé / Bluetooth. `handling: 'native'` (défaut) :
+  // le natif exécute lui-même play/pause/next/prev/seek/stop, aucun relais JS nécessaire
+  // (le « précédent intelligent » — >3 s = redémarrer la piste — est natif aussi).
+  TrackPlayer.setCommands({
     capabilities: [
-      Capability.Play,
-      Capability.Pause,
-      Capability.SkipToNext,
-      Capability.SkipToPrevious,
-      Capability.SeekTo,
-      Capability.Stop,
+      PlayerCommand.PlayPause,
+      PlayerCommand.Next,
+      PlayerCommand.Previous,
+      PlayerCommand.Seek,
+      PlayerCommand.Stop,
     ],
-    notificationCapabilities: [
-      Capability.Play,
-      Capability.Pause,
-      Capability.SkipToNext,
-      Capability.SkipToPrevious,
-    ],
-    progressUpdateEventInterval: 1,
   });
-  // Le mode de répétition n'est plus figé ici : `PlayerProvider` l'applique depuis les préférences
-  // (finition Phase 1) une fois le lecteur prêt.
 
+  // Événements côté premier plan (l'arrière-plan passe par le handler headless, cf. index.js).
+  wireForegroundPlayerEvents();
+
+  ready = true;
   return true;
-}
-
-/**
- * Sur Android, `setupPlayer` échoue si l'app est en arrière-plan au démarrage
- * (`android_cannot_setup_player_in_background`). On réessaie jusqu'à revenir au premier plan.
- */
-async function setupWithBackgroundRetry(): Promise<void> {
-  for (;;) {
-    try {
-      await TrackPlayer.setupPlayer({ autoHandleInterruptions: true });
-      return;
-    } catch (e) {
-      if ((e as { code?: string }).code !== 'android_cannot_setup_player_in_background') {
-        throw e;
-      }
-      await new Promise<void>((resolve) => setTimeout(resolve, 250));
-    }
-  }
 }
