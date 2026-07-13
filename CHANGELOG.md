@@ -7,6 +7,8 @@ et ce projet suit le [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-07-13
+
 ### Added
 
 - Sélection multiple dans la bibliothèque (« Sélectionner » depuis le menu d'un morceau) pour ajouter plusieurs titres à une playlist, les lire ensuite ou les mettre en file d'un coup.
@@ -39,5 +41,6 @@ et ce projet suit le [Semantic Versioning](https://semver.org/lang/fr/).
 - **Réglages** : vidage du cache, préférences de lecture, gestion du compte.
 - **Distribution** : publication de l'APK signé sur les releases GitHub à chaque tag, vérification de version au lancement (mise à jour recommandée ou obligatoire selon la version installée).
 
-[Unreleased]: https://github.com/allegroconfuoco/mobile/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/allegroconfuoco/mobile/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/allegroconfuoco/mobile/releases/tag/v2.0.0
 [1.0.0]: https://github.com/allegroconfuoco/mobile/releases/tag/v1.0.0
