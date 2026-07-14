@@ -7,6 +7,23 @@ et ce projet suit le [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-07-14
+
+### Added
+
+- Bouton favori (cœur) directement dans le mini-lecteur, sans avoir à ouvrir l'écran Lecture.
+- Nouvelle action « Supprimer du téléphone » sur un morceau (doublons, titres qu'on n'aime pas) : passe par le dialogue de confirmation du système Android.
+
+### Changed
+
+- La revue avant gravure des tags (en lot) affiche désormais un résumé des champs qui vont changer sur chaque carte repliée, pour ne déplier que les morceaux qui demandent une vérification.
+- Les morceaux avec plusieurs artistes (ex. « Fred again.. & Baby Keem ») sont désormais rattachés à l'artiste principal dans la vue Artistes, au lieu de former une entrée séparée.
+
+### Fixed
+
+- Le raccourci « Tout mettre en MusicBrainz » de la revue avant gravure applique maintenant aussi la pochette proposée (elle restait inchangée auparavant).
+- Amélioration de la fiabilité du bouton « titre suivant » dans la notification et sur l'écran verrouillé.
+
 ## [2.1.0] - 2026-07-14
 
 ### Added
@@ -51,7 +68,8 @@ et ce projet suit le [Semantic Versioning](https://semver.org/lang/fr/).
 - **Réglages** : vidage du cache, préférences de lecture, gestion du compte.
 - **Distribution** : publication de l'APK signé sur les releases GitHub à chaque tag, vérification de version au lancement (mise à jour recommandée ou obligatoire selon la version installée).
 
-[Unreleased]: https://github.com/allegroconfuoco/mobile/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/allegroconfuoco/mobile/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/allegroconfuoco/mobile/releases/tag/v2.2.0
 [2.1.0]: https://github.com/allegroconfuoco/mobile/releases/tag/v2.1.0
 [2.0.0]: https://github.com/allegroconfuoco/mobile/releases/tag/v2.0.0
 [1.0.0]: https://github.com/allegroconfuoco/mobile/releases/tag/v1.0.0
