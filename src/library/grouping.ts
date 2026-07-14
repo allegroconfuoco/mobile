@@ -93,7 +93,11 @@ export type AlbumGroup = {
   artworkUri: string | null;
 };
 
-/** Regroupe les pistes par artiste interprète, triées par nom. */
+/**
+ * Regroupe les pistes par artiste interprète **brut** (champ exact), triées par nom.
+ * ⚠️ La vue Artistes n'utilise plus cette fonction : voir `buildMergedArtists` (artists.ts), qui
+ * rattache les pistes multi-artistes (« A & B ») aux artistes connus en solo.
+ */
 export function buildArtists(tracks: LocalTrack[]): ArtistGroup[] {
   const map = new Map<
     string,
@@ -147,7 +151,10 @@ export function buildAlbums(tracks: LocalTrack[]): AlbumGroup[] {
     .sort((a, b) => compare(a.artist, b.artist) || compare(a.title, b.title));
 }
 
-/** Pistes d'un artiste donné (nom exact renvoyé par `buildArtists`). */
+/**
+ * Pistes d'un artiste donné (nom **exact** renvoyé par `buildArtists`).
+ * ⚠️ Les écrans alignés sur la vue Artistes utilisent `tracksForMergedArtist` (artists.ts).
+ */
 export function tracksForArtist(tracks: LocalTrack[], name: string): LocalTrack[] {
   return tracks.filter((t) => artistOf(t) === name);
 }

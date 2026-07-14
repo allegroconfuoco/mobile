@@ -35,7 +35,8 @@ import { showToast } from '@/components/Toast';
 import { TrackTagEditor } from '@/components/TrackTagEditor';
 import { useLibrary } from '@/library/LibraryProvider';
 import { usePlaylistsContext } from '@/library/PlaylistsProvider';
-import { makeAlbumKey, tracksForAlbum, tracksForArtist } from '@/library/grouping';
+import { makeAlbumKey, tracksForAlbum } from '@/library/grouping';
+import { tracksForMergedArtist } from '@/library/artists';
 import type { LocalTrack } from '@/library/useAudioLibrary';
 import * as db from '@/library/db';
 import {
@@ -85,7 +86,8 @@ export default function WriteTagsScreen() {
       case 'album':
         return tracksForAlbum(tracks, makeAlbumKey(params.albumArtist ?? '', params.album ?? ''));
       case 'artist':
-        return tracksForArtist(tracks, params.artist ?? '');
+        // Vue fusionnée : le lot « artiste » couvre aussi ses collaborations (cohérent avec la page).
+        return tracksForMergedArtist(tracks, params.artist ?? '');
       case 'playlist':
         return getEntries(params.playlistId ?? '')
           .map((e) => (e.localTrackId ? tracksById.get(e.localTrackId) : undefined))

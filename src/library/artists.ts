@@ -12,7 +12,8 @@
  * artistes — l'utilisateur n'a alors qu'à ne rien retirer. Le regroupement automatique d'album, lui,
  * reste conservateur (featuring seulement).
  */
-import { normalizeForSearch } from './grouping';
+import { albumKeyOf, artistOf, normalizeForSearch, type ArtistGroup } from './grouping';
+import type { LocalTrack } from './useAudioLibrary';
 
 /**
  * Sépare parenthèses/crochets de featuring en séparateur plat, puis normalise les délimiteurs.
@@ -76,4 +77,96 @@ export function removeArtist(name: string | null | undefined, target: string): s
     return null;
   }
   return joinArtists(kept);
+}
+
+// --- Vue Artistes fusionnée (multi-artistes rattachés aux artistes solo connus) ----------------
+//
+// La vue Artistes groupait sur le champ artiste **brut** : « Fred again.. & Baby Keem » formait un
+// artiste distinct de « Fred again.. ». Ici, une piste multi-artistes est rattachée aux artistes
+// **qui existent déjà en solo** dans la bibliothèque (comparaison pliée casse/accents). Garde-fou
+// pour les vrais noms de groupe : si AUCUN composant n'existe en solo, le nom complet est conservé
+// tel quel (« Earth, Wind & Fire » ne s'éclate pas tant qu'on n'a pas de piste de « Wind » seul).
+// Effet de bord voulu : deux graphies solo (« Fred Again.. » / « Fred again.. ») fusionnent aussi,
+// sous la première graphie rencontrée.
+
+/** Index des artistes « solo » : nom normalisé → graphie canonique (première rencontrée). */
+function buildSoloIndex(tracks: LocalTrack[]): Map<string, string> {
+  const solo = new Map<string, string>();
+  for (const t of tracks) {
+    const parts = splitArtists(artistOf(t));
+    if (parts.length === 1) {
+      const key = normalizeForSearch(parts[0]);
+      if (!solo.has(key)) {
+        solo.set(key, parts[0]);
+      }
+    }
+  }
+  return solo;
+}
+
+/** Noms (canoniques) des groupes d'artistes auxquels une piste appartient. */
+function groupNamesFor(rawArtist: string, solo: Map<string, string>): string[] {
+  const parts = splitArtists(rawArtist);
+  if (parts.length <= 1) {
+    const canonical = solo.get(normalizeForSearch(rawArtist));
+    return [canonical ?? rawArtist];
+  }
+  const hits: string[] = [];
+  for (const part of parts) {
+    const canonical = solo.get(normalizeForSearch(part));
+    if (canonical && !hits.includes(canonical)) {
+      hits.push(canonical);
+    }
+  }
+  // Aucun composant connu en solo : probable nom de groupe, on le garde entier.
+  return hits.length > 0 ? hits : [rawArtist];
+}
+
+/**
+ * Regroupe les pistes par artiste pour la vue Artistes, en rattachant les pistes multi-artistes
+ * (« A & B », « A, B », « A feat. B ») à chaque artiste **connu en solo** ; une collab sans aucun
+ * solo connu reste une entrée à part entière. Même forme de sortie que `buildArtists` (grouping).
+ */
+export function buildMergedArtists(tracks: LocalTrack[]): ArtistGroup[] {
+  const solo = buildSoloIndex(tracks);
+  const map = new Map<
+    string,
+    { name: string; trackCount: number; albums: Set<string>; artworkUri: string | null }
+  >();
+  for (const t of tracks) {
+    for (const name of groupNamesFor(artistOf(t), solo)) {
+      const key = normalizeForSearch(name);
+      let group = map.get(key);
+      if (!group) {
+        group = { name, trackCount: 0, albums: new Set(), artworkUri: null };
+        map.set(key, group);
+      }
+      group.trackCount += 1;
+      group.albums.add(albumKeyOf(t));
+      if (!group.artworkUri) {
+        group.artworkUri = t.artworkUri ?? t.coverArtUrl;
+      }
+    }
+  }
+  return [...map.values()]
+    .map((g) => ({
+      name: g.name,
+      trackCount: g.trackCount,
+      albumCount: g.albums.size,
+      artworkUri: g.artworkUri,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }));
+}
+
+/**
+ * Pistes d'un artiste de la vue fusionnée (nom renvoyé par `buildMergedArtists`) : ses pistes solo
+ * **et** ses collaborations. Remplace `tracksForArtist` (grouping) partout où l'écran détail /
+ * les lots doivent refléter la vue Artistes.
+ */
+export function tracksForMergedArtist(tracks: LocalTrack[], name: string): LocalTrack[] {
+  const solo = buildSoloIndex(tracks);
+  const needle = normalizeForSearch(name);
+  return tracks.filter((t) =>
+    groupNamesFor(artistOf(t), solo).some((n) => normalizeForSearch(n) === needle)
+  );
 }
