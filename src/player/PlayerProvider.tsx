@@ -14,7 +14,7 @@ import TrackPlayer, { Event, RepeatMode, type MediaItem } from '@rntp/player';
 import { type LocalTrack } from '@/library/useAudioLibrary';
 import * as db from '@/library/db';
 import { setPlayContext, type PlayContext } from './playRecorder';
-import { ensurePlayerReady } from './setup';
+import { ensurePlayerReady, reassertCommands } from './setup';
 import { resolvePlayerTracks } from './track';
 import { planMoves, restoreOrder, shuffleAfter } from './shuffle';
 import { requestNotificationPermission } from './notifPermission';
@@ -250,6 +250,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
       TrackPlayer.setMediaItems(finalTracks, resumeIndex);
       TrackPlayer.play();
+      // Le contrôleur natif est forcément connecté ici : on re-pose les commandes distantes pour
+      // rattraper une rediffusion perdue à l'init (bouton suivant absent de la notif, cf. setup.ts).
+      reassertCommands();
       refreshQueue();
     },
     [refreshQueue]

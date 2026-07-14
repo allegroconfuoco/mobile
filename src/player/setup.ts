@@ -40,6 +40,31 @@ export function ensurePlayerReady(): boolean {
   // Boutons de la notification / écran verrouillé / Bluetooth. `handling: 'native'` (défaut) :
   // le natif exécute lui-même play/pause/next/prev/seek/stop, aucun relais JS nécessaire
   // (le « précédent intelligent » — >3 s = redémarrer la piste — est natif aussi).
+  reassertCommands();
+
+  // Événements côté premier plan (l'arrière-plan passe par le handler headless, cf. index.js).
+  wireForegroundPlayerEvents();
+
+  ready = true;
+  return true;
+}
+
+/**
+ * (Ré)applique les commandes distantes (capacités de la notif / écran verrouillé).
+ *
+ * ⚠️ Appelée à l'init **et à chaque lancement de file** (`playQueue`) : côté natif, `setCommands`
+ * persiste la config puis la rediffuse via une commande custom sur le MediaController du module —
+ * or ce contrôleur se connecte de façon asynchrone après `setupPlayer`, et la rediffusion est
+ * **silencieusement perdue** s'il n'est pas encore connecté (`MainThreadMediaController.run` ne
+ * met pas en file). Un contrôleur système déjà connecté (notif d'un service encore vivant) peut
+ * alors rester sur des commandes périmées → notif sans bouton suivant. Re-poser les commandes au
+ * moment où on charge une file (contrôleur forcément connecté) referme cette fenêtre ; l'appel
+ * est idempotent et trivial (écriture SharedPreferences + une commande custom).
+ */
+export function reassertCommands(): void {
+  if (!isSupported) {
+    return;
+  }
   TrackPlayer.setCommands({
     capabilities: [
       PlayerCommand.PlayPause,
@@ -49,10 +74,4 @@ export function ensurePlayerReady(): boolean {
       PlayerCommand.Stop,
     ],
   });
-
-  // Événements côté premier plan (l'arrière-plan passe par le handler headless, cf. index.js).
-  wireForegroundPlayerEvents();
-
-  ready = true;
-  return true;
 }
