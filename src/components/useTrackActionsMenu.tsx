@@ -1,13 +1,15 @@
 import { useState, type ReactNode } from 'react';
+import { Alert } from 'react-native';
 import { useRouter } from '@/lib/useRouter';
 
 import { TrackActionsSheet } from '@/components/TrackActionsSheet';
 import { PlaylistPickerSheet } from '@/components/PlaylistPickerSheet';
 import { showToast } from '@/components/Toast';
-import { tapLight } from '@/lib/haptics';
+import { tapLight, tapMedium } from '@/lib/haptics';
 import { useLibrary } from '@/library/LibraryProvider';
 import { useFavorites } from '@/library/FavoritesProvider';
 import type { LocalTrack } from '@/library/useAudioLibrary';
+import { deleteTrackFromDevice } from '@/library/deleteTrack';
 import { confirmRestoreTags } from '@/library/writeTags';
 import * as db from '@/library/db';
 import { usePlayer } from '@/player/PlayerProvider';
@@ -90,6 +92,33 @@ export function useTrackActionsMenu(options?: { onSelect?: (track: LocalTrack) =
             setTrackExcluded(menuTrack.id, true);
             showToast('Piste exclue de la bibliothèque', 'block');
           }
+        }}
+        onDeleteFromDevice={() => {
+          if (!menuTrack) {
+            return;
+          }
+          const track = menuTrack;
+          Alert.alert(
+            'Supprimer du téléphone ?',
+            `« ${track.title} » (${track.filename}) sera définitivement supprimé de l’appareil.`,
+            [
+              { text: 'Annuler', style: 'cancel' },
+              {
+                text: 'Supprimer',
+                style: 'destructive',
+                onPress: () =>
+                  void deleteTrackFromDevice(track).then((deleted) => {
+                    if (deleted) {
+                      tapMedium();
+                      reloadTracks();
+                      showToast('Fichier supprimé du téléphone', 'delete');
+                    } else {
+                      showToast('Suppression annulée ou refusée', 'block');
+                    }
+                  }),
+              },
+            ]
+          );
         }}
       />
 
