@@ -11,6 +11,8 @@ import { useIsPlaying, useProgress } from '@rntp/player';
 
 import { usePlayer } from '@/player/PlayerProvider';
 import { useActiveTrack } from '@/player/usePlayback';
+import { useLibrary } from '@/library/LibraryProvider';
+import { useFavorites } from '@/library/FavoritesProvider';
 import { tapLight } from '@/lib/haptics';
 
 // Seuils de geste (px). Au-delà, on déclenche l'action ; en-deçà, retour à la position de repos.
@@ -31,6 +33,13 @@ export function MiniPlayer() {
   const track = useActiveTrack();
   const isPlaying = useIsPlaying();
   const { togglePlayPause, skipToNext, skipToPrevious } = usePlayer();
+
+  // Like sur la piste active : résolution mediaId → piste locale (même motif que now-playing).
+  // Piste non résolue (fichier disparu) : le coeur est simplement masqué.
+  const { tracksById } = useLibrary();
+  const { isFavorite, toggleFavorite } = useFavorites();
+  const local = track?.mediaId ? (tracksById.get(track.mediaId) ?? null) : null;
+  const liked = local ? isFavorite(local.id) : false;
 
   // Entrée : montée + fondu au montage (quand une première piste devient disponible).
   const [enter] = useState(() => new Animated.Value(0));
@@ -154,6 +163,24 @@ export function MiniPlayer() {
               {artist}
             </Text>
           </View>
+          {local && (
+            <PressableScale
+              onPress={() => {
+                tapLight();
+                toggleFavorite(local.id, local.mbid);
+              }}
+              style={styles.likeHit}
+              accessibilityRole="button"
+              accessibilityLabel={liked ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+            >
+              <Icon
+                name={liked ? 'favorite' : 'favorite_border'}
+                filled={liked}
+                size={22}
+                color={liked ? colors.accent : colors.textSecondary}
+              />
+            </PressableScale>
+          )}
           <PressableScale
             onPress={() => {
               tapLight();
@@ -249,6 +276,10 @@ const styles = StyleSheet.create({
   playHit: {
     paddingVertical: spacing.sm,
     paddingLeft: spacing.sm,
+  },
+  likeHit: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xs,
   },
 });
 

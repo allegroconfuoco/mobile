@@ -52,6 +52,11 @@ export type TrackActionsSheetProps = {
   hasFileBackup?: boolean;
   /** Exclut la piste de la bibliothèque (et des scans suivants). */
   onExclude: () => void;
+  /**
+   * Supprime le fichier du téléphone (doublon, titre qu'on n'aime pas). Optionnel : l'action
+   * n'apparaît que si fourni. Destructif — l'appelant confirme avant d'agir.
+   */
+  onDeleteFromDevice?: () => void;
 };
 
 export function TrackActionsSheet({
@@ -70,6 +75,7 @@ export function TrackActionsSheet({
   onRestoreFile,
   hasFileBackup = false,
   onExclude,
+  onDeleteFromDevice,
 }: TrackActionsSheetProps) {
   const visible = title !== null;
 
@@ -123,6 +129,13 @@ export function TrackActionsSheet({
 
           <View style={styles.divider} />
           <Action icon="block" label="Exclure de la bibliothèque" onPress={run(onExclude)} />
+          {onDeleteFromDevice && (
+            <Action
+              icon="delete"
+              label="Supprimer du téléphone"
+              onPress={run(onDeleteFromDevice)}
+            />
+          )}
         </>
       ) : (
         <>

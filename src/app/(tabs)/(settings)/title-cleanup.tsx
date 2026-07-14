@@ -42,13 +42,8 @@ import { tapMedium } from '@/lib/haptics';
 import { SearchBar } from '@/components/SearchBar';
 import { useLibrary } from '@/library/LibraryProvider';
 import * as db from '@/library/db';
-import {
-  filterTracks,
-  makeAlbumKey,
-  sortTracks,
-  tracksForAlbum,
-  tracksForArtist,
-} from '@/library/grouping';
+import { filterTracks, makeAlbumKey, sortTracks, tracksForAlbum } from '@/library/grouping';
+import { tracksForMergedArtist } from '@/library/artists';
 import { isMasked, loadMaskedArtists, maskSet, saveMaskedArtists } from '@/library/rewriteMasks';
 import { applyCleanupRules, CLEANUP_PRESETS, DEFAULT_RULES } from '@/library/titleCleanup';
 import type { LocalTrack } from '@/library/useAudioLibrary';
@@ -89,7 +84,8 @@ export default function TitleCleanupScreen() {
   // Périmètre figé au montage (comme write-tags) : artiste, album, ou bibliothèque entière.
   const [targets] = useState<LocalTrack[]>(() => {
     if (params.artist) {
-      return tracksForArtist(tracks, params.artist);
+      // Vue fusionnée : le lot « artiste » couvre aussi ses collaborations (cohérent avec la page).
+      return tracksForMergedArtist(tracks, params.artist);
     }
     if (params.album !== undefined) {
       return tracksForAlbum(tracks, makeAlbumKey(params.albumArtist ?? '', params.album ?? ''));

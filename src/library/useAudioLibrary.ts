@@ -14,12 +14,12 @@ import { displayFolder, folderOf, isAutoExcluded } from './folders';
 import { clearCoverCache, extractTrackTags, type TrackTags } from './trackTags';
 import {
   buildAlbums,
-  buildArtists,
   sortTracks,
   type AlbumGroup,
   type ArtistGroup,
   type TrackSort,
 } from './grouping';
+import { buildMergedArtists } from './artists';
 
 /**
  * Un morceau audio détecté sur l'appareil.
@@ -445,7 +445,8 @@ export function useAudioLibrary(): UseAudioLibrary {
 
   const tracks = useMemo(() => sortTracks(visibleTracks, trackSort), [visibleTracks, trackSort]);
 
-  const artists = useMemo(() => buildArtists(visibleTracks), [visibleTracks]);
+  // Vue fusionnée : les pistes multi-artistes sont rattachées aux artistes connus en solo.
+  const artists = useMemo(() => buildMergedArtists(visibleTracks), [visibleTracks]);
   const albums = useMemo(() => buildAlbums(visibleTracks), [visibleTracks]);
 
   // Index sur *toutes* les pistes (pas seulement les visibles) : les playlists doivent pouvoir

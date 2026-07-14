@@ -10,13 +10,8 @@ import { Icon } from '@/components/Icon';
 import { TrackIndexRow } from '@/components/TrackRow';
 import { QuickActionsSheet } from '@/components/QuickActionsSheet';
 import { useTrackActionsMenu } from '@/components/useTrackActionsMenu';
-import {
-  buildAlbums,
-  tracksForAlbum,
-  tracksForArtist,
-  UNKNOWN_ARTIST,
-  type AlbumGroup,
-} from '@/library/grouping';
+import { buildAlbums, tracksForAlbum, UNKNOWN_ARTIST, type AlbumGroup } from '@/library/grouping';
+import { tracksForMergedArtist } from '@/library/artists';
 import { useLibrary } from '@/library/LibraryProvider';
 import { usePlayer } from '@/player/PlayerProvider';
 import { useActiveTrack } from '@/player/usePlayback';
@@ -41,7 +36,8 @@ export default function ArtistScreen() {
 
   // Sections (un album = une section) + file de lecture à plat, dérivées ensemble.
   const { sections, queue, albumCount } = useMemo(() => {
-    const artistTracks = tracksForArtist(tracks, name);
+    // Vue fusionnée : inclut les collaborations (« X & Y ») de l'artiste, comme la vue Artistes.
+    const artistTracks = tracksForMergedArtist(tracks, name);
     const albums = buildAlbums(artistTracks);
     const built = albums.map((album) => ({
       album,
