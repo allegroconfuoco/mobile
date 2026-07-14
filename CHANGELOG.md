@@ -7,6 +7,16 @@ et ce projet suit le [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-07-14
+
+### Added
+
+- Nouvel outil « Associer les artistes inconnus » (Réglages > Métadonnées & fichiers, et depuis la page d'un artiste inconnu) : passe en revue les titres sans artiste un par un, avec des propositions MusicBrainz classées par popularité et un geste de swipe pour valider ou passer au suivant. Le fichier en cours peut être écouté directement depuis l'écran.
+
+### Changed
+
+- Les recherches MusicBrainz par titre seul (utilisées par la nouvelle revue) sont désormais classées par popularité réelle de l'artiste plutôt que par ordre aléatoire, pour proposer l'artiste le plus probable en premier.
+
 ## [2.0.0] - 2026-07-13
 
 ### Added
@@ -41,6 +51,7 @@ et ce projet suit le [Semantic Versioning](https://semver.org/lang/fr/).
 - **Réglages** : vidage du cache, préférences de lecture, gestion du compte.
 - **Distribution** : publication de l'APK signé sur les releases GitHub à chaque tag, vérification de version au lancement (mise à jour recommandée ou obligatoire selon la version installée).
 
-[Unreleased]: https://github.com/allegroconfuoco/mobile/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/allegroconfuoco/mobile/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/allegroconfuoco/mobile/releases/tag/v2.1.0
 [2.0.0]: https://github.com/allegroconfuoco/mobile/releases/tag/v2.0.0
 [1.0.0]: https://github.com/allegroconfuoco/mobile/releases/tag/v1.0.0

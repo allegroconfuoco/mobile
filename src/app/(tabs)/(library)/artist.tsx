@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
 import { useRouter } from '@/lib/useRouter';
 
-import { colors, spacing, typography } from '@/theme';
+import { colors, radii, spacing, typography } from '@/theme';
 import { BackButton } from '@/components/BackButton';
 import { Icon } from '@/components/Icon';
 import { TrackIndexRow } from '@/components/TrackRow';
@@ -98,6 +98,25 @@ export default function ArtistScreen() {
               {queue.length} {queue.length > 1 ? 'titres' : 'titre'} · {albumCount}{' '}
               {albumCount > 1 ? 'albums' : 'album'}
             </Text>
+            {name === UNKNOWN_ARTIST && queue.length > 0 && (
+              /* Bac « Artiste inconnu » : bandeau explicite vers la revue swipe (miroir du
+                 bandeau « Ranger les titres » du bac Album inconnu, cf. album.tsx). */
+              <Pressable
+                onPress={() => router.push('/sort-unknown-artist')}
+                style={({ pressed }) => [styles.identifyBanner, pressed && styles.identifyPressed]}
+                accessibilityRole="button"
+                accessibilityLabel="Associer les artistes via MusicBrainz"
+              >
+                <Icon name="auto_fix_high" size={22} color={colors.accentIcon} />
+                <View style={styles.identifyBannerText}>
+                  <Text style={styles.identifyBannerTitle}>Associer les artistes</Text>
+                  <Text style={styles.identifyBannerHint}>
+                    Revue titre par titre via MusicBrainz, propositions classées.
+                  </Text>
+                </View>
+                <Icon name="chevron_right" size={22} color={colors.textMuted} />
+              </Pressable>
+            )}
           </View>
         }
         renderSectionHeader={({ section }) => (
@@ -201,6 +220,36 @@ const styles = StyleSheet.create({
     ...typography.label,
     color: colors.textMuted,
     marginTop: spacing.sm,
+  },
+  identifyBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'stretch',
+    gap: spacing.md,
+    marginTop: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  identifyPressed: {
+    backgroundColor: colors.background,
+  },
+  identifyBannerText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  identifyBannerTitle: {
+    ...typography.heading,
+    fontSize: 14,
+  },
+  identifyBannerHint: {
+    ...typography.body,
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
   },
   albumHeader: {
     flexDirection: 'row',
