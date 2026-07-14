@@ -40,6 +40,7 @@ import type { LocalTrack } from '@/library/useAudioLibrary';
 import * as db from '@/library/db';
 import {
   initTrackReview,
+  reviewChanges,
   reviewToTags,
   setAllSources,
   type TrackReview,
@@ -224,6 +225,12 @@ export default function WriteTagsScreen() {
               renderItem={({ item }) => {
                 const open = expanded === item.trackId;
                 const resolved = reviewToTags(item);
+                // Revue rapide : la carte repliée annonce déjà ce qui va changer (champ :
+                // avant → après) — on ne déplie que si quelque chose surprend.
+                const changes = reviewChanges(item);
+                const coverChanged = item.cover !== 'keep';
+                const shown = changes.slice(0, 3);
+                const extra = changes.length - shown.length;
                 return (
                   <View style={styles.card}>
                     <Pressable
@@ -246,6 +253,36 @@ export default function WriteTagsScreen() {
                         color={colors.textSecondary}
                       />
                     </Pressable>
+                    {!open && (
+                      <View style={styles.changeSummary}>
+                        {changes.length === 0 && !coverChanged ? (
+                          <Text style={styles.changeNone}>Aucun changement</Text>
+                        ) : (
+                          <>
+                            {shown.map((c) => (
+                              <Text key={c.key} style={styles.changeLine} numberOfLines={1}>
+                                <Text style={styles.changeLabel}>{c.label} : </Text>
+                                <Text style={styles.changeFrom}>{c.from}</Text>
+                                <Text style={styles.changeLabel}> → </Text>
+                                {c.to}
+                              </Text>
+                            ))}
+                            {coverChanged && (
+                              <Text style={styles.changeLine} numberOfLines={1}>
+                                <Text style={styles.changeLabel}>Pochette : </Text>
+                                {item.cover === 'remote' ? 'MusicBrainz' : 'supprimée'}
+                              </Text>
+                            )}
+                            {extra > 0 && (
+                              <Text style={styles.changeNone}>
+                                +{extra} autre{extra > 1 ? 's' : ''} changement
+                                {extra > 1 ? 's' : ''}
+                              </Text>
+                            )}
+                          </>
+                        )}
+                      </View>
+                    )}
                     {open && (
                       <View style={styles.cardBody}>
                         <TrackTagEditor review={item} onChange={updateReview} />
@@ -382,6 +419,28 @@ const styles = StyleSheet.create({
   cardBody: {
     padding: spacing.md,
     paddingTop: 0,
+  },
+  changeSummary: {
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.md,
+    gap: 2,
+  },
+  changeLine: {
+    fontFamily: fontFamily.medium,
+    fontSize: 12,
+    color: colors.textPrimary,
+  },
+  changeLabel: {
+    color: colors.textMuted,
+  },
+  changeFrom: {
+    color: colors.textSecondary,
+    textDecorationLine: 'line-through',
+  },
+  changeNone: {
+    fontFamily: fontFamily.medium,
+    fontSize: 12,
+    color: colors.textMuted,
   },
   note: {
     fontFamily: fontFamily.medium,

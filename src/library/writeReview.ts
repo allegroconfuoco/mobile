@@ -179,10 +179,65 @@ export function setCover(review: TrackReview, cover: CoverChoice): TrackReview {
   return { ...review, cover };
 }
 
+/** Libellés FR des champs (affichage du résumé de changements). */
+export const FIELD_LABELS: Record<FieldKey, string> = {
+  title: 'Titre',
+  artist: 'Artiste',
+  album: 'Album',
+  albumArtist: 'Artiste d’album',
+  trackNo: 'N° piste',
+  discNo: 'N° disque',
+};
+
+export type FieldChange = {
+  key: FieldKey;
+  label: string;
+  /** Valeur actuelle du tag fichier (affichable, '∅' si absente). */
+  from: string;
+  /** Valeur qui sera gravée (affichable, '∅' si le champ sera vidé). */
+  to: string;
+};
+
+const EMPTY_MARK = '∅';
+
+function displayable(v: string | number | null): string {
+  if (v === null || (typeof v === 'string' && v.trim().length === 0)) {
+    return EMPTY_MARK;
+  }
+  return String(v);
+}
+
+/**
+ * Champs dont la valeur **gravée** différera du tag fichier actuel : c'est le résumé qu'on montre
+ * sur la carte repliée du mode lot (revue rapide : on ne déplie que ce qui surprend). La pochette
+ * n'est pas un champ texte, l'appelant la traite à part via `review.cover`.
+ */
+export function reviewChanges(review: TrackReview): FieldChange[] {
+  // Vide (null / chaîne blanche) replié sur null : « pas de tag » et « tag vide » sont équivalents.
+  const norm = (v: string | number | null) =>
+    v === null ? null : typeof v === 'number' ? v : v.trim() || null;
+  const changes: FieldChange[] = [];
+  for (const key of ALL_FIELDS) {
+    const before = review.base[key] ?? null;
+    const after = resolveField(review, key);
+    if (norm(before) !== norm(after)) {
+      changes.push({
+        key,
+        label: FIELD_LABELS[key],
+        from: displayable(before),
+        to: displayable(after),
+      });
+    }
+  }
+  return changes;
+}
+
 /**
  * Force la source de **tous les champs éligibles** (raccourci du mode lot : « tout en MusicBrainz »,
  * « tout au fichier »). Un champ dont la source cible n'a pas de valeur retombe sur le fichier (on
- * ne bascule pas un champ sur un MusicBrainz vide).
+ * ne bascule pas un champ sur un MusicBrainz vide). La **pochette** suit le même raccourci :
+ * « tout MusicBrainz » = pochette distante quand elle existe, « tout au fichier » = garder celle
+ * du fichier.
  */
 export function setAllSources(review: TrackReview, source: 'file' | 'mb'): TrackReview {
   const fields = {} as Record<FieldKey, FieldState>;
@@ -190,5 +245,6 @@ export function setAllSources(review: TrackReview, source: 'file' | 'mb'): Track
     const canMb = source === 'mb' && review.mb && hasValue(review.mb[key]);
     fields[key] = { source: canMb ? 'mb' : 'file', manual: review.fields[key].manual };
   }
-  return { ...review, fields };
+  const cover: CoverChoice = source === 'mb' && review.hasRemoteCover ? 'remote' : 'keep';
+  return { ...review, fields, cover };
 }
