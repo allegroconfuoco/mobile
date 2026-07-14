@@ -38,6 +38,13 @@ const TOOLS: Tool[] = [
     href: '/bulk-set-artist',
   },
   {
+    icon: 'auto_fix_high',
+    label: 'Associer les artistes inconnus',
+    // Seul outil du hub en overlay réversible (pas de gravure) : le préciser dans le hint.
+    hint: 'Revue titre par titre via MusicBrainz — overlay réversible, gravure séparée',
+    href: '/sort-unknown-artist',
+  },
+  {
     icon: 'link_off',
     label: 'Dissocier des albums',
     hint: 'Retirer des titres de leur album (vide le tag)',
