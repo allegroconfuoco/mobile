@@ -23,7 +23,7 @@ type Mode = 'signin' | 'signup';
  *
  * Rendu uniquement par le garde `Stack.Protected guard={!isAuthenticated}` de `_layout.tsx` :
  * une connexion réussie fait passer `status` à `authenticated`, ce qui redirige automatiquement
- * vers `(tabs)` (pas de navigation manuelle ici).
+ * vers `(app)` (pas de navigation manuelle ici).
  */
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();

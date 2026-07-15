@@ -10,10 +10,12 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useLocalSearchParams } from 'expo-router';
 import { useRouter } from '@/lib/useRouter';
 
 import { colors, spacing, typography } from '@/theme';
 import { Icon, type IconName } from '@/components/Icon';
+import { MenuButton } from '@/components/MenuButton';
 import { SearchBar } from '@/components/SearchBar';
 import { SegmentedControl, type Segment } from '@/components/SegmentedControl';
 import { useTrackActionsMenu } from '@/components/useTrackActionsMenu';
@@ -58,14 +60,24 @@ const SEARCH_PLACEHOLDER: Record<LibraryView, string> = {
   playlists: 'Rechercher une playlist',
 };
 
-/** Onglet Bibliothèque : morceaux / artistes / albums de la musique locale. */
+/** Une valeur de vue valide, ou `tracks` par défaut (param d'URL d'entrée depuis le menu latéral). */
+function parseView(value: string | undefined): LibraryView {
+  return value === 'artists' || value === 'albums' || value === 'playlists' ? value : 'tracks';
+}
+
+/** Écran Bibliothèque : morceaux / artistes / albums / playlists de la musique locale.
+ *  La vue de départ vient du param `view` (entrée du menu latéral) ; le segmented control laisse
+ *  ensuite basculer entre vues sans rouvrir le menu. */
 export default function LibraryScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const library = useLibrary();
   const { status, tracks, refreshing, error, rescan } = library;
   const { lastSync } = useSync();
-  const [view, setView] = useState<LibraryView>('tracks');
+  const params = useLocalSearchParams<{ view?: string }>();
+  // Vue initiale = param d'entrée. L'écran est remonté à chaque entrée depuis le menu (pile remise
+  // à plat), donc lire le param au montage suffit ; le segmented control gère la suite localement.
+  const [view, setView] = useState<LibraryView>(() => parseView(params.view));
   const [query, setQuery] = useState('');
 
   // Indicateur hors-ligne discret (lot 6) : la dernière tentative de synchro a échoué.
@@ -87,6 +99,7 @@ export default function LibraryScreen() {
   return (
     <View style={[styles.screen, { paddingTop: insets.top + spacing.md }]}>
       <View style={styles.header}>
+        <MenuButton />
         <View style={{ flex: 1 }}>
           <Text style={styles.title}>Bibliothèque</Text>
           <Text style={styles.subtitle}>{subtitle}</Text>

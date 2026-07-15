@@ -32,11 +32,11 @@ import { UpdateModal } from '@/update/UpdateModal';
 // Garde le splash affiché tant que les polices ET la session ne sont pas prêtes.
 SplashScreen.preventAutoHideAsync();
 
-// Ancre de la pile pour les deep links : au lancement à froid sur un écran ciblé, `(tabs)` est
+// Ancre de la pile pour les deep links : au lancement à froid sur un écran ciblé, `(app)` est
 // monté SOUS lui, sinon cet écran serait seul dans la pile et « retour » sortirait de l'app.
 // (La notification média v5 ouvre l'app par un simple launch intent, sans deep link.)
 export const unstable_settings = {
-  initialRouteName: '(tabs)',
+  initialRouteName: '(app)',
 };
 
 export default function RootLayout() {
@@ -82,7 +82,7 @@ export default function RootLayout() {
  * pile) qu'une fois les polices chargées ET la session restaurée depuis le stockage sécurisé —
  * sinon on flasherait l'écran login avant de savoir qu'on est déjà connecté.
  *
- * `Stack.Protected` (expo-router) redirige automatiquement : connecté → `(tabs)`, sinon → `login`.
+ * `Stack.Protected` (expo-router) redirige automatiquement : connecté → `(app)`, sinon → `login`.
  */
 function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
   const { status, isAuthenticated } = useAuth();
@@ -116,12 +116,12 @@ function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
           contentStyle: { backgroundColor: colors.background },
         }}
       >
-        {/* Écrans accessibles une fois connecté. Les écrans de détail (artiste, album, playlist,
-            favoris, réglages…) vivent désormais DANS les stacks d'onglet (cf. (tabs)/(library) et
-            (tabs)/(settings)) pour garder la tab bar + le mini-player visibles. Seuls restent au
-            niveau racine les modaux, qui doivent couvrir toute l'UI, barre comprise. */}
+        {/* Écrans accessibles une fois connecté. Toutes les listes et les écrans de détail (artiste,
+            album, playlist, favoris, réglages…) vivent dans le Stack unique de `(app)`, sous le
+            mini-player persistant + le menu latéral. Seuls restent au niveau racine les modaux, qui
+            doivent couvrir toute l'UI, chrome bas compris. */}
         <Stack.Protected guard={isAuthenticated}>
-          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="(app)" />
           {/* Écran Lecture présenté en modal, au-dessus de la tab bar. */}
           <Stack.Screen name="now-playing" options={{ presentation: 'modal' }} />
           {/* File d'attente, également en modal. */}

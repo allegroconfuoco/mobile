@@ -6,6 +6,7 @@ import { useRouter } from '@/lib/useRouter';
 
 import { colors, radii, spacing, typography } from '@/theme';
 import { Icon, type IconName } from '@/components/Icon';
+import { MenuButton } from '@/components/MenuButton';
 import { showToast } from '@/components/Toast';
 import { tapLight, tapMedium } from '@/lib/haptics';
 import { useAuth } from '@/auth/AuthProvider';
@@ -155,6 +156,9 @@ export default function SettingsScreen() {
         contentContainerStyle={{ paddingTop: insets.top + spacing.md }}
         showsVerticalScrollIndicator={false}
       >
+        <View style={{ paddingLeft: spacing.xxl, paddingTop: spacing.xs }}>
+          <MenuButton />
+        </View>
         <Text style={styles.title}>Réglages</Text>
 
         <View style={styles.list}>
