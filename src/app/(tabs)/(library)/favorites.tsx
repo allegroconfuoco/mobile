@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -9,6 +9,8 @@ import { BackButton } from '@/components/BackButton';
 import { PressableScale } from '@/components/PressableScale';
 import { TrackIndexRow, trackRowLayout } from '@/components/TrackRow';
 import { useTrackActionsMenu } from '@/components/useTrackActionsMenu';
+import { useTrackSelection } from '@/components/useTrackSelection';
+import { PlaylistPickerSheet } from '@/components/PlaylistPickerSheet';
 import type { LocalTrack } from '@/library/useAudioLibrary';
 import { useLibrary } from '@/library/LibraryProvider';
 import { useFavorites } from '@/library/FavoritesProvider';
@@ -25,7 +27,6 @@ export default function FavoritesScreen() {
   const { playQueue } = usePlayer();
   const { status: syncStatus, syncNow } = useSync();
   const activeTrack = useActiveTrack();
-  const trackMenu = useTrackActionsMenu();
 
   // Pull-to-refresh unifié (passe UX) : tirer = re-scan incrémental + synchro, comme partout.
   const refreshAll = useCallback(() => {
@@ -52,6 +53,12 @@ export default function FavoritesScreen() {
     (index: number) => void playQueue(tracks, index, 'favorites'),
     [playQueue, tracks]
   );
+
+  // Mode sélection multiple mutualisé (`tracks` = favoris résolus, ordonnés). `onSelect` révèle
+  // « Sélectionner » au long-press. NB : « Favoris » sur une sélection déjà likée est un no-op utile.
+  const [pickerTracks, setPickerTracks] = useState<LocalTrack[] | null>(null);
+  const selection = useTrackSelection(tracks, { onAddToPlaylist: setPickerTracks });
+  const trackMenu = useTrackActionsMenu({ onSelect: selection.start });
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + spacing.sm }]}>
@@ -84,6 +91,8 @@ export default function FavoritesScreen() {
         )}
       </View>
 
+      {selection.header}
+
       <FlatList
         data={tracks}
         keyExtractor={(track) => track.id}
@@ -92,13 +101,15 @@ export default function FavoritesScreen() {
         initialNumToRender={12}
         maxToRenderPerBatch={16}
         refreshControl={
-          <RefreshControl
-            refreshing={pulling}
-            onRefresh={refreshAll}
-            tintColor={colors.accent}
-            colors={[colors.accent]}
-            progressBackgroundColor={colors.surface}
-          />
+          selection.active ? undefined : (
+            <RefreshControl
+              refreshing={pulling}
+              onRefresh={refreshAll}
+              tintColor={colors.accent}
+              colors={[colors.accent]}
+              progressBackgroundColor={colors.surface}
+            />
+          )
         }
         renderItem={({ item, index }) => (
           <TrackIndexRow
@@ -107,6 +118,9 @@ export default function FavoritesScreen() {
             isActive={item.id === activeTrack?.mediaId}
             onPlay={playFrom}
             onLongPress={trackMenu.open}
+            selectionMode={selection.active}
+            selected={selection.isSelected(item.id)}
+            onToggleSelect={selection.toggle}
           />
         )}
         ListEmptyComponent={
@@ -121,7 +135,15 @@ export default function FavoritesScreen() {
         showsVerticalScrollIndicator={false}
       />
 
+      {selection.footer}
+
       {trackMenu.element}
+
+      <PlaylistPickerSheet
+        tracks={pickerTracks}
+        onClose={() => setPickerTracks(null)}
+        onAdded={selection.cancel}
+      />
     </View>
   );
 }

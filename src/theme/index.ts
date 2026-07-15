@@ -25,6 +25,9 @@ export const colors = {
   /** Texte posé sur l'accent (boutons pleins). */
   onAccent: '#1A0D07',
 
+  /** Accent « danger » (action destructive : suppression physique d'un fichier). */
+  danger: '#E5544B',
+
   /** Texte principal. */
   textPrimary: '#FAF4EE',
   /** Texte secondaire. */

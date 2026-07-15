@@ -1,9 +1,12 @@
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
 import { colors, radii, spacing, typography } from '@/theme';
 import { Icon } from '@/components/Icon';
+import { showToast } from '@/components/Toast';
+import { tapMedium } from '@/lib/haptics';
+import { deleteTracksFromDevice } from '@/library/deleteTrack';
 import { useLibrary } from '@/library/LibraryProvider';
 
 /**
@@ -16,9 +19,56 @@ import { useLibrary } from '@/library/LibraryProvider';
 export default function LibrarySettingsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { folders, excludedTracks, setFolderIncluded, setTrackExcluded, rescan } = useLibrary();
+  const {
+    folders,
+    excludedTracks,
+    setFolderIncluded,
+    setTrackExcluded,
+    setTracksExcluded,
+    reloadTracks,
+    rescan,
+  } = useLibrary();
 
   const excludedFolders = folders.filter((f) => !f.included).length;
+
+  // Supprime physiquement du téléphone tous les titres exclus individuellement (pas les dossiers).
+  // Un seul dialogue de consentement système pour tout le lot (`Asset.delete`). Après suppression
+  // on purge les lignes d'exclusion devenues orphelines et on recharge l'affichage.
+  const deleteAllExcluded = () => {
+    const toDelete = excludedTracks;
+    if (toDelete.length === 0) {
+      return;
+    }
+    const n = toDelete.length;
+    Alert.alert(
+      `Supprimer ${n} titre${n > 1 ? 's' : ''} exclu${n > 1 ? 's' : ''} du téléphone ?`,
+      `${n > 1 ? `${n} fichiers seront` : 'Le fichier sera'} définitivement supprimé${n > 1 ? 's' : ''} de l’appareil. Les dossiers exclus ne sont pas concernés.`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Supprimer',
+          style: 'destructive',
+          onPress: () =>
+            void deleteTracksFromDevice(toDelete).then((deleted) => {
+              if (deleted) {
+                tapMedium();
+                setTracksExcluded(
+                  toDelete.map((t) => t.id),
+                  false
+                );
+                reloadTracks();
+                showToast(
+                  n > 1 ? `${n} fichiers supprimés du téléphone` : 'Fichier supprimé du téléphone',
+                  'delete'
+                );
+              } else {
+                showToast('Suppression annulée ou refusée', 'block');
+              }
+            }),
+        },
+      ]
+    );
+  };
 
   return (
     <View style={styles.screen}>
@@ -106,6 +156,22 @@ export default function LibrarySettingsScreen() {
                 </View>
               ))}
             </View>
+            {/* Suppression physique de tous les titres exclus (un seul dialogue système). */}
+            <Pressable
+              onPress={deleteAllExcluded}
+              style={({ pressed }) => [styles.deleteButton, pressed && styles.deleteButtonPressed]}
+              accessibilityRole="button"
+              accessibilityLabel="Supprimer les titres exclus du téléphone"
+            >
+              <Icon name="delete" size={20} color={colors.danger} />
+              <Text style={styles.deleteLabel}>
+                Supprimer {excludedTracks.length > 1 ? 'ces titres' : 'ce titre'} du téléphone
+              </Text>
+            </Pressable>
+            <Text style={styles.note}>
+              Supprime définitivement les fichiers exclus de l’appareil. Sans effet sur les dossiers
+              exclus.
+            </Text>
           </>
         )}
 
@@ -201,5 +267,25 @@ const styles = StyleSheet.create({
   scanLabel: {
     ...typography.heading,
     fontSize: 14,
+  },
+  deleteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.lg,
+    marginHorizontal: spacing.xxl,
+    paddingVertical: spacing.lg,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.danger,
+  },
+  deleteButtonPressed: {
+    backgroundColor: colors.surface,
+  },
+  deleteLabel: {
+    ...typography.heading,
+    fontSize: 14,
+    color: colors.danger,
   },
 });

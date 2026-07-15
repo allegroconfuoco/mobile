@@ -11,6 +11,8 @@ import { TrackCover } from '@/components/TrackCover';
 import { TrackIndexRow } from '@/components/TrackRow';
 import { QuickActionsSheet, type QuickAction } from '@/components/QuickActionsSheet';
 import { useTrackActionsMenu } from '@/components/useTrackActionsMenu';
+import { useTrackSelection } from '@/components/useTrackSelection';
+import { PlaylistPickerSheet } from '@/components/PlaylistPickerSheet';
 import {
   groupAlbumRowsByDisc,
   makeAlbumKey,
@@ -21,6 +23,7 @@ import {
 } from '@/library/grouping';
 import * as db from '@/library/db';
 import { useLibrary } from '@/library/LibraryProvider';
+import type { LocalTrack } from '@/library/useAudioLibrary';
 import { usePlayer } from '@/player/PlayerProvider';
 import { useActiveTrack } from '@/player/usePlayback';
 
@@ -42,7 +45,6 @@ export default function AlbumScreen() {
   const { tracks } = useLibrary();
   const { playQueue } = usePlayer();
   const activeTrack = useActiveTrack();
-  const trackMenu = useTrackActionsMenu();
 
   // Pistes locales, sections (locaux + fantômes) et index de lecture, dérivés ensemble. Si l'album
   // a été identifié (#23), on charge la tracklist complète de la release et on intercale les titres
@@ -85,6 +87,12 @@ export default function AlbumScreen() {
     (index: number) => void playQueue(albumTracks, index, 'album'),
     [playQueue, albumTracks]
   );
+
+  // Mode sélection multiple mutualisé : porte sur les pistes locales de l'album (les fantômes ne
+  // sont pas sélectionnables). `onSelect` révèle « Sélectionner » au long-press.
+  const [pickerTracks, setPickerTracks] = useState<LocalTrack[] | null>(null);
+  const selection = useTrackSelection(albumTracks, { onAddToPlaylist: setPickerTracks });
+  const trackMenu = useTrackActionsMenu({ onSelect: selection.start });
 
   const identify = () => router.push({ pathname: '/identify-album', params: { artist, title } });
   const sortUnknown = () => router.push({ pathname: '/sort-unknown-album', params: { artist } });
@@ -139,6 +147,8 @@ export default function AlbumScreen() {
           </Pressable>
         </View>
       </View>
+
+      {selection.header}
 
       <SectionList
         sections={sections}
@@ -207,6 +217,9 @@ export default function AlbumScreen() {
               subtitle={item.track.artist ?? UNKNOWN_ARTIST}
               onPlay={playFrom}
               onLongPress={trackMenu.open}
+              selectionMode={selection.active}
+              selected={selection.isSelected(item.track.id)}
+              onToggleSelect={selection.toggle}
             />
           ) : (
             <GhostRow position={item.position} title={item.title} />
@@ -218,7 +231,15 @@ export default function AlbumScreen() {
         showsVerticalScrollIndicator={false}
       />
 
+      {selection.footer}
+
       {trackMenu.element}
+
+      <PlaylistPickerSheet
+        tracks={pickerTracks}
+        onClose={() => setPickerTracks(null)}
+        onAdded={selection.cancel}
+      />
 
       <QuickActionsSheet
         visible={actionsOpen}

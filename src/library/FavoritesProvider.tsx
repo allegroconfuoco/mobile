@@ -20,6 +20,12 @@ export type UseFavorites = {
    * `mbid` est stocké en réserve pour une future synchro (inerte en Phase 1).
    */
   toggleFavorite: (trackId: string, mbid?: string | null) => boolean;
+  /**
+   * Ajoute un lot de pistes aux favoris (action groupée du mode sélection). Sens « liker »
+   * uniquement : les pistes déjà likées sont laissées telles quelles (pas un toggle). Renvoie le
+   * nombre de pistes réellement ajoutées.
+   */
+  addFavorites: (entries: { id: string; mbid?: string | null }[]) => number;
 };
 
 const FavoritesContext = createContext<UseFavorites | null>(null);
@@ -43,9 +49,26 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
     return nowLiked;
   }, []);
 
+  const addFavorites = useCallback((entries: { id: string; mbid?: string | null }[]) => {
+    const added = db.addFavorites(
+      entries.map((e) => ({ trackId: e.id, mbid: e.mbid ?? null })),
+      Date.now()
+    );
+    if (added.length > 0) {
+      setFavoriteIds((prev) => {
+        const next = new Set(prev);
+        for (const id of added) {
+          next.add(id);
+        }
+        return next;
+      });
+    }
+    return added.length;
+  }, []);
+
   const value = useMemo<UseFavorites>(
-    () => ({ favoriteIds, isFavorite, toggleFavorite }),
-    [favoriteIds, isFavorite, toggleFavorite]
+    () => ({ favoriteIds, isFavorite, toggleFavorite, addFavorites }),
+    [favoriteIds, isFavorite, toggleFavorite, addFavorites]
   );
 
   return <FavoritesContext.Provider value={value}>{children}</FavoritesContext.Provider>;

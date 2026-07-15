@@ -286,6 +286,8 @@ type UseAudioLibrary = {
   setFolderIncluded: (folder: string, included: boolean) => void;
   /** Exclut/réinclut une piste individuelle. */
   setTrackExcluded: (id: string, excluded: boolean) => void;
+  /** Exclut/réinclut un lot de pistes (action groupée du mode sélection). */
+  setTracksExcluded: (ids: string[], excluded: boolean) => void;
 };
 
 /**
@@ -511,6 +513,24 @@ export function useAudioLibrary(): UseAudioLibrary {
     });
   }, []);
 
+  const setTracksExcluded = useCallback((ids: string[], excluded: boolean) => {
+    if (ids.length === 0) {
+      return;
+    }
+    db.setTracksExcluded(ids, excluded);
+    setExcludedIds((prev) => {
+      const nextSet = new Set(prev);
+      for (const id of ids) {
+        if (excluded) {
+          nextSet.add(id);
+        } else {
+          nextSet.delete(id);
+        }
+      }
+      return nextSet;
+    });
+  }, []);
+
   const hasCache = allTracks.length > 0;
 
   let status: LibraryStatus;
@@ -545,5 +565,6 @@ export function useAudioLibrary(): UseAudioLibrary {
     clearCache,
     setFolderIncluded,
     setTrackExcluded,
+    setTracksExcluded,
   };
 }

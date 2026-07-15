@@ -10,9 +10,12 @@ import { Icon } from '@/components/Icon';
 import { TrackIndexRow } from '@/components/TrackRow';
 import { QuickActionsSheet } from '@/components/QuickActionsSheet';
 import { useTrackActionsMenu } from '@/components/useTrackActionsMenu';
+import { useTrackSelection } from '@/components/useTrackSelection';
+import { PlaylistPickerSheet } from '@/components/PlaylistPickerSheet';
 import { buildAlbums, tracksForAlbum, UNKNOWN_ARTIST, type AlbumGroup } from '@/library/grouping';
 import { tracksForMergedArtist } from '@/library/artists';
 import { useLibrary } from '@/library/LibraryProvider';
+import type { LocalTrack } from '@/library/useAudioLibrary';
 import { usePlayer } from '@/player/PlayerProvider';
 import { useActiveTrack } from '@/player/usePlayback';
 
@@ -32,7 +35,6 @@ export default function ArtistScreen() {
   const { tracks } = useLibrary();
   const { playQueue } = usePlayer();
   const activeTrack = useActiveTrack();
-  const trackMenu = useTrackActionsMenu();
 
   // Sections (un album = une section) + file de lecture à plat, dérivées ensemble.
   const { sections, queue, albumCount } = useMemo(() => {
@@ -63,6 +65,12 @@ export default function ArtistScreen() {
     [playQueue, queue]
   );
 
+  // Mode sélection multiple mutualisé : `queue` = toutes les pistes de l'artiste, ordonnées (sert
+  // au « Tout » et à l'ordre des actions groupées). `onSelect` révèle « Sélectionner » au long-press.
+  const [pickerTracks, setPickerTracks] = useState<LocalTrack[] | null>(null);
+  const selection = useTrackSelection(queue, { onAddToPlaylist: setPickerTracks });
+  const trackMenu = useTrackActionsMenu({ onSelect: selection.start });
+
   const [actionsOpen, setActionsOpen] = useState(false);
 
   return (
@@ -80,6 +88,8 @@ export default function ArtistScreen() {
           <Icon name="more_horiz" size={24} color={colors.textPrimary} />
         </Pressable>
       </View>
+
+      {selection.header}
 
       <SectionList
         sections={sections}
@@ -136,6 +146,9 @@ export default function ArtistScreen() {
             subtitle=""
             onPlay={playFrom}
             onLongPress={trackMenu.open}
+            selectionMode={selection.active}
+            selected={selection.isSelected(item.id)}
+            onToggleSelect={selection.toggle}
           />
         )}
         windowSize={7}
@@ -144,7 +157,15 @@ export default function ArtistScreen() {
         showsVerticalScrollIndicator={false}
       />
 
+      {selection.footer}
+
       {trackMenu.element}
+
+      <PlaylistPickerSheet
+        tracks={pickerTracks}
+        onClose={() => setPickerTracks(null)}
+        onAdded={selection.cancel}
+      />
 
       <QuickActionsSheet
         visible={actionsOpen}
