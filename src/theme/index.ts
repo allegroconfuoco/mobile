@@ -94,7 +94,7 @@ export const radii = {
  * @expo-google-fonts/* et aux clés passées à `useFonts` (voir src/app/_layout.tsx).
  */
 export const fontFamily = {
-  regular: 'SchibstedGrotesk_400Regular',
+  // Pas de 400 : aucun style ne l'utilise, et chaque poids embarqué pèse ~100 Ko dans l'APK.
   medium: 'SchibstedGrotesk_500Medium',
   semibold: 'SchibstedGrotesk_600SemiBold',
   bold: 'SchibstedGrotesk_700Bold',

@@ -1,11 +1,15 @@
-import {
-  SchibstedGrotesk_400Regular,
-  SchibstedGrotesk_500Medium,
-  SchibstedGrotesk_600SemiBold,
-  SchibstedGrotesk_700Bold,
-  SchibstedGrotesk_800ExtraBold,
-} from '@expo-google-fonts/schibsted-grotesk';
-import { MaterialSymbols_400Regular } from '@expo-google-fonts/material-symbols';
+// Imports **profonds** (le fichier .ttf, pas le baril du paquet) : `@expo-google-fonts/*`
+// expose un index qui fait `require()` de TOUTES ses variantes, donc importer quatre poids depuis
+// le baril embarquait les douze (les huit italiques comprises) — ~800 Ko d'APK pour rien, Metro
+// n'ayant aucun moyen de savoir lesquelles servent.
+import SchibstedGrotesk_500Medium from '@expo-google-fonts/schibsted-grotesk/500Medium/SchibstedGrotesk_500Medium.ttf';
+import SchibstedGrotesk_600SemiBold from '@expo-google-fonts/schibsted-grotesk/600SemiBold/SchibstedGrotesk_600SemiBold.ttf';
+import SchibstedGrotesk_700Bold from '@expo-google-fonts/schibsted-grotesk/700Bold/SchibstedGrotesk_700Bold.ttf';
+import SchibstedGrotesk_800ExtraBold from '@expo-google-fonts/schibsted-grotesk/800ExtraBold/SchibstedGrotesk_800ExtraBold.ttf';
+// Material Symbols **sous-ensemblée** aux ~68 ligatures de `IconName` (12 Ko au lieu des 956 Ko
+// de la police complète du paquet npm, qui embarque 4000 icônes dont on en utilise 68).
+// Régénération : cf. l'entrée « taille de l'APK » du journal ci-dessous.
+import MaterialSymbolsSubset from '../../assets/fonts/MaterialSymbolsOutlined_Subset.ttf';
 // Instance FILL=1 (cœur plein) des Material Symbols Outlined, cf. theme.fontFamily.iconsFilled.
 // La police par défaut est FILL=0 (contour) : sans elle, un cœur liké ne peut pas être plein.
 import MaterialSymbolsFilled from '../../assets/fonts/MaterialSymbolsOutlined_Filled.ttf';
@@ -41,13 +45,12 @@ export const unstable_settings = {
 
 export default function RootLayout() {
   const [loaded, error] = useFonts({
-    SchibstedGrotesk_400Regular,
     SchibstedGrotesk_500Medium,
     SchibstedGrotesk_600SemiBold,
     SchibstedGrotesk_700Bold,
     SchibstedGrotesk_800ExtraBold,
-    MaterialSymbols_400Regular,
-    // Clé = nom de famille référencé par theme.fontFamily.iconsFilled.
+    // Clés = noms de famille référencés par theme.fontFamily.icons / .iconsFilled.
+    MaterialSymbols_400Regular: MaterialSymbolsSubset,
     MaterialSymbolsFilled,
   });
 
