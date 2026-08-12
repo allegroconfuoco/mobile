@@ -51,8 +51,13 @@ export type LocalTrack = {
   discNo: number | null;
   /** URI `file://` d'une pochette extraite en cache au scan, ou `null`. */
   artworkUri: string | null;
-  /** Date d'ajout au media store (ms), ou `null` — sert au tri « Ajouts récents ». */
-  creationTime: number | null;
+  /**
+   * Date (ms) à laquelle la bibliothèque a vu ce fichier pour la première fois — sert au tri
+   * « Ajouts récents » et à la rangée « Récemment ajoutés » de l'accueil. Posée à l'insertion en
+   * base et préservée aux ré-écritures (renommage, ré-encodage, ré-tag) ; `null` seulement pour
+   * une ligne antérieure à la migration v16 sans date de modif.
+   */
+  addedAt: number | null;
   /** MBID résolu par l'enrichissement MusicBrainz (issue #19), ou `null`. */
   mbid: string | null;
   /** URL de pochette distante (Cover Art Archive) issue de l'enrichissement, repli d'affichage. */
@@ -132,6 +137,8 @@ function toRow(
     durationMs: meta.duration,
     modificationTime: meta.modificationTime,
     creationTime: meta.creationTime,
+    // Posée par `upsertTracks` (préservée si la ligne existe déjà) — jamais fournie ici.
+    addedAt: null,
     artist: tags.artist,
     album: tags.album,
     albumArtist: tags.albumArtist,
@@ -157,7 +164,7 @@ function rowToTrack(r: db.TrackRow): LocalTrack {
     trackNo: r.trackNo,
     discNo: r.discNo,
     artworkUri: r.artworkUri,
-    creationTime: r.creationTime,
+    addedAt: r.addedAt,
     mbid: r.mbid,
     coverArtUrl: r.coverArtUrl,
   };

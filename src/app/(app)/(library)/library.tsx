@@ -13,7 +13,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
 import { useRouter } from '@/lib/useRouter';
 
-import { colors, spacing, typography } from '@/theme';
+import { colors, radii, spacing, typography } from '@/theme';
+import { BottomSheet } from '@/components/BottomSheet';
 import { Icon, type IconName } from '@/components/Icon';
 import { MenuButton } from '@/components/MenuButton';
 import { SearchBar } from '@/components/SearchBar';
@@ -162,15 +163,15 @@ function themedRefresh(refreshing: boolean, onRefresh: () => void) {
   );
 }
 
-/** Cycle de tri des morceaux : titre → artiste → ajouts récents. */
-function nextSort(sort: TrackSort): TrackSort {
-  if (sort === 'title') {
-    return 'artist';
-  }
-  if (sort === 'artist') {
-    return 'recent';
-  }
-  return 'title';
+/** Libellés des critères de tri, dans l'ordre d'affichage de la feuille. */
+const SORT_OPTIONS: { key: TrackSort; label: string; icon: IconName }[] = [
+  { key: 'title', label: 'Titre', icon: 'sort' },
+  { key: 'artist', label: 'Artiste', icon: 'person' },
+  { key: 'recent', label: 'Ajouts récents', icon: 'history' },
+];
+
+function sortLabel(sort: TrackSort): string {
+  return SORT_OPTIONS.find((o) => o.key === sort)?.label ?? 'Titre';
 }
 
 function LibraryContent({
@@ -204,6 +205,8 @@ function LibraryContent({
 
   // Pistes en attente dans le sélecteur de playlist (action groupée du mode sélection).
   const [pickerTracks, setPickerTracks] = useState<LocalTrack[] | null>(null);
+  // Feuille de choix du tri (vue Morceaux).
+  const [sortSheet, setSortSheet] = useState(false);
 
   // Mode sélection multiple mutualisé (hook partagé, cf. useTrackSelection) : « Tout » et l'ordre
   // des actions groupées portent sur la liste **filtrée** affichée.
@@ -238,7 +241,7 @@ function LibraryContent({
           query={query}
           activeId={activeTrack?.mediaId}
           sort={trackSort}
-          onToggleSort={() => setTrackSort(nextSort(trackSort))}
+          onOpenSort={() => setSortSheet(true)}
           onPlay={playFromFiltered}
           onLongPress={trackMenu.open}
           refreshing={pulling}
@@ -269,6 +272,13 @@ function LibraryContent({
       )}
 
       {trackMenu.element}
+
+      <SortSheet
+        visible={sortSheet}
+        sort={trackSort}
+        onSelect={setTrackSort}
+        onClose={() => setSortSheet(false)}
+      />
 
       {/* Sélecteur de playlist du mode sélection (multi-titres) : distinct de celui du menu
           long-press (une seule piste), la sortie du mode ne se fait qu'après un ajout réussi. */}
@@ -399,7 +409,7 @@ function TracksView({
   query,
   activeId,
   sort,
-  onToggleSort,
+  onOpenSort,
   onPlay,
   onLongPress,
   refreshing,
@@ -410,7 +420,7 @@ function TracksView({
   query: string;
   activeId: string | undefined;
   sort: TrackSort;
-  onToggleSort: () => void;
+  onOpenSort: () => void;
   onPlay: (index: number) => void;
   onLongPress: (track: LocalTrack) => void;
   refreshing: boolean;
@@ -444,7 +454,7 @@ function TracksView({
           la place à la barre de sélection (compteur + Tout + Annuler). */}
       {selectionMode
         ? selection.header
-        : !(query && tracks.length === 0) && <SortBar sort={sort} onToggle={onToggleSort} />}
+        : !(query && tracks.length === 0) && <SortBar sort={sort} onOpen={onOpenSort} />}
       <FlatList
         data={tracks}
         keyExtractor={trackKey}
@@ -463,21 +473,65 @@ function TracksView({
   );
 }
 
-/** Barre de tri de la liste des morceaux (cycle titre / artiste / ajouts récents). */
-function SortBar({ sort, onToggle }: { sort: TrackSort; onToggle: () => void }) {
-  const label = sort === 'title' ? 'Titre' : sort === 'artist' ? 'Artiste' : 'Ajouts récents';
+/**
+ * Barre de tri de la liste des morceaux. Ouvre une feuille de choix plutôt que de cycler entre les
+ * critères : atteindre « Ajouts récents » coûtait jusqu'à trois taps, il en faut désormais un.
+ */
+function SortBar({ sort, onOpen }: { sort: TrackSort; onOpen: () => void }) {
+  const label = sortLabel(sort);
   return (
     <Pressable
-      onPress={onToggle}
+      onPress={onOpen}
       style={styles.sortBar}
       accessibilityRole="button"
-      accessibilityLabel={`Trier par ${label}. Toucher pour changer.`}
+      accessibilityLabel={`Trier par ${label}. Toucher pour choisir un autre tri.`}
     >
       <Icon name="sort" size={18} color={colors.textSecondary} />
       <Text style={styles.sortLabel}>
         Tri : <Text style={styles.sortValue}>{label}</Text>
       </Text>
+      <Icon name="expand_more" size={18} color={colors.textMuted} />
     </Pressable>
+  );
+}
+
+/** Feuille de choix du tri : les trois critères, celui en cours coché. */
+function SortSheet({
+  visible,
+  sort,
+  onSelect,
+  onClose,
+}: {
+  visible: boolean;
+  sort: TrackSort;
+  onSelect: (sort: TrackSort) => void;
+  onClose: () => void;
+}) {
+  return (
+    <BottomSheet visible={visible} onClose={onClose}>
+      <Text style={styles.sortSheetHeader}>Trier les morceaux</Text>
+      {SORT_OPTIONS.map((option) => {
+        const current = option.key === sort;
+        return (
+          <Pressable
+            key={option.key}
+            onPress={() => {
+              onClose();
+              onSelect(option.key);
+            }}
+            android_ripple={{ color: colors.borderStrong }}
+            style={({ pressed }) => [styles.sortSheetRow, pressed && styles.sortSheetRowPressed]}
+            accessibilityRole="radio"
+            accessibilityState={{ selected: current }}
+            accessibilityLabel={option.label}
+          >
+            <Icon name={option.icon} size={22} color={colors.accentIcon} />
+            <Text style={styles.sortSheetLabel}>{option.label}</Text>
+            {current && <Icon name="check" size={20} color={colors.accent} />}
+          </Pressable>
+        );
+      })}
+    </BottomSheet>
   );
 }
 
@@ -804,6 +858,31 @@ const styles = StyleSheet.create({
   sortValue: {
     color: colors.textSecondary,
     fontFamily: typography.heading.fontFamily,
+  },
+  sortSheetHeader: {
+    ...typography.label,
+    color: colors.textMuted,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
+  },
+  // Même gabarit que QuickActionsSheet / TrackActionsSheet : les feuilles doivent être
+  // indiscernables à l'œil.
+  sortSheetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.lg,
+    borderRadius: radii.sm,
+  },
+  // Le fond de la feuille étant déjà `surface`, l'état pressé s'enfonce vers `background`.
+  sortSheetRowPressed: {
+    backgroundColor: colors.background,
+  },
+  sortSheetLabel: {
+    ...typography.heading,
+    flex: 1,
+    fontSize: 15,
   },
   artistRow: {
     flexDirection: 'row',

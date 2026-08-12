@@ -81,12 +81,9 @@ export default function DashboardScreen() {
     }, [computedAt])
   );
 
-  // Derniers titres ajoutés au media store (indépendant des écoutes).
+  // Derniers titres entrés dans la bibliothèque (indépendant des écoutes).
   const recent = useMemo(
-    () =>
-      [...tracks]
-        .sort((a, b) => (b.creationTime ?? 0) - (a.creationTime ?? 0))
-        .slice(0, RECENT_LIMIT),
+    () => [...tracks].sort((a, b) => (b.addedAt ?? 0) - (a.addedAt ?? 0)).slice(0, RECENT_LIMIT),
     [tracks]
   );
   const recentPlaylists = playlists.slice(0, 3);
