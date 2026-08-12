@@ -31,7 +31,7 @@ import {
 // Au-delà, la proposition n'a plus de sens (on ne « reprend » pas une écoute d'il y a 15 jours).
 const FRESHNESS_MS = 7 * 86_400_000;
 
-type Resume = {
+export type Resume = {
   /** File résolue contre la bibliothèque locale, dans l'ordre. */
   tracks: LocalTrack[];
   /** Index de reprise dans `tracks` (recalé après omission des fichiers disparus). */

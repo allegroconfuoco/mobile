@@ -11,7 +11,11 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 import * as db from './db';
 
 export type UseFavorites = {
-  /** Ids media-store des pistes favorites (ordre non garanti ; pour l'appartenance). */
+  /**
+   * Ids media-store des pistes favorites, **du plus récemment liké au plus ancien** (l'ordre
+   * d'itération d'un `Set` est celui des insertions, et `loadFavoriteIds` trie par `added_at DESC`).
+   * L'écran Favoris s'appuie dessus pour montrer les derniers ajouts en tête.
+   */
   favoriteIds: Set<string>;
   /** La piste est-elle likée ? */
   isFavorite: (trackId: string) => boolean;
@@ -38,13 +42,14 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
   const toggleFavorite = useCallback((trackId: string, mbid: string | null = null) => {
     const nowLiked = db.toggleFavorite(trackId, mbid, Date.now());
     setFavoriteIds((prev) => {
-      const next = new Set(prev);
-      if (nowLiked) {
-        next.add(trackId);
-      } else {
+      if (!nowLiked) {
+        const next = new Set(prev);
         next.delete(trackId);
+        return next;
       }
-      return next;
+      // Le nouveau liké passe en tête : `add` sur une copie l'aurait mis en queue, et la vue
+      // Favoris (qui itère ce Set) l'aurait affiché tout en bas jusqu'au prochain rechargement.
+      return new Set([trackId, ...prev]);
     });
     return nowLiked;
   }, []);
@@ -55,13 +60,8 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
       Date.now()
     );
     if (added.length > 0) {
-      setFavoriteIds((prev) => {
-        const next = new Set(prev);
-        for (const id of added) {
-          next.add(id);
-        }
-        return next;
-      });
+      // Même règle que le toggle : le lot vient d'être liké, il passe donc en tête.
+      setFavoriteIds((prev) => new Set([...added, ...prev]));
     }
     return added.length;
   }, []);

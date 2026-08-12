@@ -33,6 +33,11 @@ const SCREEN_WIDTH = Dimensions.get('window').width;
 const PANEL_WIDTH = Math.min(320, Math.round(SCREEN_WIDTH * 0.82));
 // Au-delà (ou vitesse suffisante), un glissement vers la gauche ferme le menu.
 const CLOSE_DISTANCE = PANEL_WIDTH * 0.35;
+/** Bande sensible au bord gauche : assez large pour être atteignable, assez fine pour ne pas
+ *  intercepter les glissements de contenu (le geste « Lire ensuite » des lignes de piste). */
+const EDGE_WIDTH = 20;
+/** Distance à tirer depuis le bord pour ouvrir le menu. */
+const OPEN_DISTANCE = PANEL_WIDTH * 0.3;
 
 type MenuItem = {
   /** Clé d'état actif (comparée au chemin / au param `view`). */
@@ -76,7 +81,15 @@ const SECONDARY: MenuItem[] = [
   { key: 'settings', icon: 'settings', label: 'Réglages', href: '/settings' },
 ];
 
-export function AppDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function AppDrawer({
+  open,
+  onClose,
+  onOpen,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onOpen: () => void;
+}) {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const pathname = usePathname();
@@ -133,6 +146,32 @@ export function AppDrawer({ open, onClose }: { open: boolean; onClose: () => voi
         },
       }),
     [tx, onClose]
+  );
+
+  // Glissement depuis le bord gauche pour ouvrir. Le geste part d'une bande étroite toujours
+  // interactive (l'overlay, lui, est neutralisé tant que le menu est fermé) et tire `tx` depuis
+  // sa position hors écran : c'est la même valeur animée que l'ouverture au hamburger, donc le
+  // relâchement enchaîne sans saut.
+  const edgePan = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_e, g) => g.dx > 8 && g.dx > Math.abs(g.dy) * 1.5,
+        onPanResponderMove: (_e, g) => {
+          tx.setValue(Math.min(0, -PANEL_WIDTH + g.dx));
+        },
+        onPanResponderRelease: (_e, g) => {
+          if (g.dx > OPEN_DISTANCE || g.vx > 0.5) {
+            onOpen();
+          } else {
+            Animated.timing(tx, {
+              toValue: -PANEL_WIDTH,
+              duration: 160,
+              useNativeDriver: true,
+            }).start();
+          }
+        },
+      }),
+    [tx, onOpen]
   );
 
   const scrimOpacity = tx.interpolate({
@@ -202,43 +241,61 @@ export function AppDrawer({ open, onClose }: { open: boolean; onClose: () => voi
   };
 
   return (
-    // Toujours monté ; fermé = transparent (scrim opacity 0), panneau hors écran (tx), et surtout
-    // non-interactif + hors arbre a11y pour ne rien capter ni annoncer derrière l'app.
-    <View
-      style={StyleSheet.absoluteFill}
-      pointerEvents={open ? 'auto' : 'none'}
-      accessibilityViewIsModal={open}
-      importantForAccessibility={open ? 'auto' : 'no-hide-descendants'}
-    >
-      <Animated.View style={[styles.scrim, { opacity: scrimOpacity }]}>
-        <Pressable
-          style={StyleSheet.absoluteFill}
-          onPress={onClose}
-          accessibilityLabel="Fermer le menu"
-        />
-      </Animated.View>
+    <>
+      {/* Zone d'ouverture au glissement, hors de l'overlay (qui est neutralisé quand le menu est
+          fermé). Symétriquement neutralisée une fois le menu ouvert. */}
+      <View
+        {...edgePan.panHandlers}
+        style={styles.edge}
+        pointerEvents={open ? 'none' : 'auto'}
+        importantForAccessibility="no-hide-descendants"
+      />
 
-      <Animated.View
-        {...pan.panHandlers}
-        style={[
-          styles.panel,
-          { paddingTop: insets.top + spacing.xl, transform: [{ translateX: tx }] },
-        ]}
+      {/* Toujours monté ; fermé = transparent (scrim opacity 0), panneau hors écran (tx), et
+          surtout non-interactif + hors arbre a11y pour ne rien capter ni annoncer derrière l'app. */}
+      <View
+        style={StyleSheet.absoluteFill}
+        pointerEvents={open ? 'auto' : 'none'}
+        accessibilityViewIsModal={open}
+        importantForAccessibility={open ? 'auto' : 'no-hide-descendants'}
       >
-        <View style={styles.header}>
-          <Text style={styles.wordmark}>Fuoco</Text>
-          <Text style={styles.tagline}>Ta musique, à toi</Text>
-        </View>
+        <Animated.View style={[styles.scrim, { opacity: scrimOpacity }]}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={onClose}
+            accessibilityLabel="Fermer le menu"
+          />
+        </Animated.View>
 
-        <View style={styles.group}>{PRIMARY.map(renderItem)}</View>
-        <View style={styles.divider} />
-        <View style={styles.group}>{SECONDARY.map(renderItem)}</View>
-      </Animated.View>
-    </View>
+        <Animated.View
+          {...pan.panHandlers}
+          style={[
+            styles.panel,
+            { paddingTop: insets.top + spacing.xl, transform: [{ translateX: tx }] },
+          ]}
+        >
+          <View style={styles.header}>
+            <Text style={styles.wordmark}>Fuoco</Text>
+            <Text style={styles.tagline}>Ta musique, à toi</Text>
+          </View>
+
+          <View style={styles.group}>{PRIMARY.map(renderItem)}</View>
+          <View style={styles.divider} />
+          <View style={styles.group}>{SECONDARY.map(renderItem)}</View>
+        </Animated.View>
+      </View>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
+  edge: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    width: EDGE_WIDTH,
+  },
   scrim: {
     position: 'absolute',
     top: 0,

@@ -70,7 +70,11 @@ export default function AppLayout() {
         </View>
       </View>
 
-      <AppDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
+      <AppDrawer
+        open={drawerOpen}
+        onOpen={() => setDrawerOpen(true)}
+        onClose={() => setDrawerOpen(false)}
+      />
     </View>
   );
 }

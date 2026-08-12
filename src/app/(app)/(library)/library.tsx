@@ -77,11 +77,14 @@ export default function LibraryScreen() {
   const library = useLibrary();
   const { status, tracks, refreshing, error, rescan } = library;
   const { lastSync } = useSync();
-  const params = useLocalSearchParams<{ view?: string }>();
+  const params = useLocalSearchParams<{ view?: string; q?: string }>();
   // Vue initiale = param d'entrée. L'écran est remonté à chaque entrée depuis le menu (pile remise
   // à plat), donc lire le param au montage suffit ; le segmented control gère la suite localement.
   const [view, setView] = useState<LibraryView>(() => parseView(params.view));
   const [query, setQuery] = useState('');
+  // `q=1` : entrée depuis la loupe de l'accueil, on ouvre directement le clavier. Lu au montage
+  // comme `view`, l'écran étant remonté à chaque entrée (pile remise à plat).
+  const [autoFocusSearch] = useState(() => params.q === '1');
 
   // Indicateur hors-ligne discret (lot 6) : la dernière tentative de synchro a échoué.
   const syncTrouble = lastSync !== null && lastSync.result !== 'ok';
@@ -137,7 +140,12 @@ export default function LibraryScreen() {
       {hasContent && <SegmentedControl segments={VIEWS} value={view} onChange={setView} />}
 
       {hasContent && (
-        <SearchBar value={query} onChangeText={setQuery} placeholder={SEARCH_PLACEHOLDER[view]} />
+        <SearchBar
+          value={query}
+          onChangeText={setQuery}
+          placeholder={SEARCH_PLACEHOLDER[view]}
+          autoFocus={autoFocusSearch}
+        />
       )}
 
       {hasContent ? (
