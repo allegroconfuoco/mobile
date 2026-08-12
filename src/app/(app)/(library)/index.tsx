@@ -7,6 +7,7 @@ import { useRouter } from '@/lib/useRouter';
 import { colors, radii, spacing, typography } from '@/theme';
 import { Icon, type IconName } from '@/components/Icon';
 import { MenuButton } from '@/components/MenuButton';
+import { OfflineBanner } from '@/components/OfflineBanner';
 import { ResumeCard } from '@/components/ResumeCard';
 import { TrackCover } from '@/components/TrackCover';
 import { showToast } from '@/components/Toast';
@@ -120,6 +121,9 @@ export default function DashboardScreen() {
             <Text style={styles.subtitle}>Fuoco · ta musique</Text>
           </View>
         </View>
+
+        {/* Réseau absent : l'app fonctionne, seule la synchro est en attente. */}
+        <OfflineBanner />
 
         {/* Reprise inter-appareils (#25) : bannière si une écoute est à reprendre. */}
         <ResumeCard />
