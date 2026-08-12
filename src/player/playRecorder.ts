@@ -30,9 +30,6 @@ const recorder = createPlayRecorder({
   newId: uuidv7,
   isIncognito: isIncognitoEnabled,
   persist(draft) {
-    // Horodatage « dernière activité locale » : la carte Reprendre (handoff) ne se montre que
-    // si l'état distant est plus frais que lui.
-    db.setSetting('playback.lastLocalAt', String(Date.now()));
     // Résolution de l'identité stable au moment de l'écriture : le registre adopte ou crée
     // l'id partagé de la piste (même clé que la synchro des playlists).
     const sharedTrackId = db.ensureSharedTrackId(draft.localTrackId);
@@ -61,7 +58,11 @@ export function setPlayContext(context: PlayContext | null): void {
   recorder.setContext(context);
 }
 
-/** État de lecture courant (position réelle), poussé au serveur par la sync (handoff). */
+/**
+ * État de lecture courant (piste + position réelle). Consommé par `playerEvents` pour horodater
+ * le point de reprise local — c'est la seule source qui connaît la position à la seconde, les
+ * événements du lecteur ne la portant qu'au tick de progression.
+ */
 export const getPlaybackSnapshot = recorder.getSnapshot;
 
 /** Hooks des événements lecteur (voir `playerEvents.ts`). */

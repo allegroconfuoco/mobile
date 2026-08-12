@@ -13,6 +13,7 @@ import { useAuth } from '@/auth/AuthProvider';
 import { useLibrary } from '@/library/LibraryProvider';
 import { coverCacheSize } from '@/library/trackTags';
 import { isIncognitoEnabled, setIncognitoEnabled } from '@/player/playRecorder';
+import { clearResumePoint } from '@/player/resumeState';
 import { useSync } from '@/sync/SyncProvider';
 
 type Row = { icon: IconName; label: string; hint: string; href?: Href };
@@ -144,6 +145,9 @@ export default function SettingsScreen() {
         style: 'destructive',
         onPress: () => {
           tapMedium();
+          // La carte « Reprendre » proposerait sinon l'écoute du compte précédent à la connexion
+          // suivante (la base est partagée entre comptes sur l'appareil).
+          clearResumePoint();
           void signOut();
         },
       },

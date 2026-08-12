@@ -29,7 +29,7 @@ export function ensurePlayerReady(): boolean {
     TrackPlayer.setupPlayer({
       // Le tick `PlaybackProgressUpdated` (1 s) n'existe que si progressSync est configuré ;
       // sans URL http, aucun POST ne part — on ne veut que l'événement, pour l'historique
-      // d'écoute (#25) et le suivi de position du handoff.
+      // d'écoute (#25) et le suivi de position du point de reprise.
       progressSync: { intervalSeconds: 1 },
     });
   } catch (e) {

@@ -2,12 +2,14 @@ import TrackPlayer, { Event, PlaybackState, type BackgroundEvent } from '@rntp/p
 
 import { notifyPlaybackError } from './playbackErrors';
 import {
+  getPlaybackSnapshot,
   recorderOnPause,
   recorderOnProgressTick,
   recorderOnQueueEnded,
   recorderOnResume,
   recorderOnTrackChanged,
 } from './playRecorder';
+import { captureResumePoint } from './resumeState';
 
 /**
  * Dispatch des événements du lecteur (@rntp/player v5), partagé entre les deux canaux :
@@ -18,10 +20,20 @@ import {
  *   `index.js`) — le natif route chaque événement vers UN des deux canaux selon l'état de l'app,
  *   jamais les deux, donc aucun double comptage.
  *
- * Y transitent l'historique d'écoute (#25, via `playRecorder`) et la gestion des erreurs de
- * lecture (skip automatique). Les commandes distantes (notification/Bluetooth) et le minuteur de
- * sommeil sont désormais gérés nativement : plus aucun relais JS.
+ * Y transitent l'historique d'écoute (#25, via `playRecorder`), le **point de reprise local**
+ * (`resumeState` — piste + position + file complète, pour retrouver son écoute après un kill) et
+ * la gestion des erreurs de lecture (skip automatique). Les commandes distantes
+ * (notification/Bluetooth) et le minuteur de sommeil sont désormais gérés nativement : plus aucun
+ * relais JS.
  */
+
+/** Photographie l'écoute en cours pour la reprise, à la position réelle connue du recorder. */
+function saveResumePoint(throttled: boolean): void {
+  const snapshot = getPlaybackSnapshot();
+  if (snapshot) {
+    captureResumePoint(snapshot.positionMs, throttled);
+  }
+}
 
 // Garde anti-boucle : en répétition de file, une file entièrement illisible ferait skip à
 // l'infini (chaque skip re-déclenchant une erreur). Le compteur se remet à zéro dès qu'une
@@ -34,11 +46,15 @@ export function dispatchPlayerEvent(event: BackgroundEvent): void {
   switch (event.type) {
     case Event.MediaItemTransition:
       recorderOnTrackChanged(event.item ?? undefined);
+      // Moment décisif : la piste active change, donc l'index du point de reprise aussi.
+      saveResumePoint(false);
       break;
 
     // Tick 1 s (émis en lecture seulement, + un tick final à la pause) : temps écouté + position.
     case Event.PlaybackProgressUpdated:
       recorderOnProgressTick(event.duration, event.position);
+      // Seule la position bouge entre deux ticks : écriture throttlée (cf. resumeState).
+      saveResumePoint(true);
       break;
 
     case Event.IsPlayingChanged:
@@ -50,12 +66,15 @@ export function dispatchPlayerEvent(event: BackgroundEvent): void {
         // même ligne). Couvre aussi un kill de l'app pendant une pause.
         recorderOnPause();
       }
+      // Pause comme reprise : le moment le plus probable avant un kill, on écrit sans attendre.
+      saveResumePoint(false);
       break;
 
     // Fin de file (hors répétition) : rien ne suivra, on clôt la session d'écoute (#25).
     case Event.PlaybackStateChanged:
       if (event.state === PlaybackState.Ended) {
         recorderOnQueueEnded();
+        saveResumePoint(false);
       }
       break;
 

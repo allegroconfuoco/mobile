@@ -82,7 +82,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       setStatus('syncing');
       try {
         // Playlists d'abord (elle porte la gestion multi-comptes / wipe), puis l'historique
-        // d'écoute + handoff (#25). Le résultat exposé est le plus dégradé des deux, pour que
+        // d'écoute (#25). Le résultat exposé est le plus dégradé des deux, pour que
         // l'indicateur hors-ligne/erreur reflète l'ensemble.
         const playlistsResult = await runSync(getAccessToken);
         const playsResult = await runPlaySync(getAccessToken);

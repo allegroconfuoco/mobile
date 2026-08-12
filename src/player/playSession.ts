@@ -49,12 +49,12 @@ export type RecorderDeps = {
   persist: (draft: PlayDraft) => void;
 };
 
-/** Dernier état de lecture connu (position réelle), pour le handoff inter-appareils (#25). */
+/** Dernier état de lecture connu (position réelle), source du point de reprise local. */
 export type PlaybackSnapshot = {
   localTrackId: string;
   positionMs: number;
   isPlaying: boolean;
-  /** Dernier signe de vie (ms) : sert d'horodatage « activité locale » côté carte Reprendre. */
+  /** Dernier signe de vie (ms). */
   updatedAt: number;
 };
 
@@ -65,13 +65,13 @@ export type PlayRecorder = {
   onTrackChanged: (next: MediaItem | undefined) => void;
   /** Tick de progression (1 s, lecture en cours) : cumule le temps écouté + suit la position. */
   onProgressTick: (durationSeconds?: number, positionSeconds?: number) => void;
-  /** Reprise de lecture : remet le snapshot handoff en « en lecture ». */
+  /** Reprise de lecture : remet le snapshot en « en lecture ». */
   onResume: () => void;
   /** Pause/arrêt : écrit l'état courant sans clore la session (une reprise cumulera dessus). */
   onPause: () => void;
   /** Fin de file (hors répétition) : clôt et écrit la session. */
   onQueueEnded: () => void;
-  /** État de lecture courant à pousser au serveur (handoff), ou `null` si rien n'a joué. */
+  /** État de lecture courant (piste + position), ou `null` si rien n'a joué. */
   getSnapshot: () => PlaybackSnapshot | null;
 };
 
@@ -157,7 +157,7 @@ export function createPlayRecorder(deps: RecorderDeps): PlayRecorder {
 
     onProgressTick(durationSeconds, positionSeconds) {
       // Position seulement : ne touche pas à `isPlaying` — le lecteur émet un tick FINAL à la
-      // pause (après l'événement de pause), qui écraserait sinon l'état « en pause » du handoff.
+      // pause (après l'événement de pause), qui écraserait sinon l'état « en pause » du snapshot.
       // Les transitions lecture/pause passent par `onResume`/`onPause`, explicites.
       if (snapshot && positionSeconds != null) {
         snapshot.positionMs = Math.round(positionSeconds * 1000);
