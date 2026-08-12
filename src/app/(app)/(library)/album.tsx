@@ -8,9 +8,11 @@ import { colors, radii, spacing, typography } from '@/theme';
 import { BackButton } from '@/components/BackButton';
 import { Icon } from '@/components/Icon';
 import { TrackCover } from '@/components/TrackCover';
+import { SwipeableRow } from '@/components/SwipeableRow';
 import { TrackIndexRow } from '@/components/TrackRow';
 import { QuickActionsSheet, type QuickAction } from '@/components/QuickActionsSheet';
 import { useTrackActionsMenu } from '@/components/useTrackActionsMenu';
+import { useTrackQuickActions } from '@/components/useTrackQuickActions';
 import { useTrackSelection } from '@/components/useTrackSelection';
 import { PlaylistPickerSheet } from '@/components/PlaylistPickerSheet';
 import {
@@ -93,6 +95,9 @@ export default function AlbumScreen() {
   const [pickerTracks, setPickerTracks] = useState<LocalTrack[] | null>(null);
   const selection = useTrackSelection(albumTracks, { onAddToPlaylist: setPickerTracks });
   const trackMenu = useTrackActionsMenu({ onSelect: selection.start });
+  // Réservé aux pistes locales : les « fantômes » (titres de la tracklist sans fichier ici) n'ont
+  // ni favori ni file possible.
+  const quickActions = useTrackQuickActions();
 
   const identify = () => router.push({ pathname: '/identify-album', params: { artist, title } });
   const sortUnknown = () => router.push({ pathname: '/sort-unknown-album', params: { artist } });
@@ -209,18 +214,28 @@ export default function AlbumScreen() {
         }
         renderItem={({ item }) =>
           item.kind === 'local' ? (
-            <TrackIndexRow
-              track={item.track}
-              index={indexById.get(item.track.id) ?? 0}
-              isActive={item.track.id === activeTrack?.mediaId}
-              leadingNumber={item.track.trackNo ?? (indexById.get(item.track.id) ?? 0) + 1}
-              subtitle={item.track.artist ?? UNKNOWN_ARTIST}
-              onPlay={playFrom}
-              onLongPress={trackMenu.open}
-              selectionMode={selection.active}
-              selected={selection.isSelected(item.track.id)}
-              onToggleSelect={selection.toggle}
-            />
+            <SwipeableRow
+              onSwipe={() => quickActions.onPlayNext(item.track)}
+              label="Lire ensuite"
+              icon="playlist_play"
+              enabled={!selection.active}
+            >
+              <TrackIndexRow
+                track={item.track}
+                index={indexById.get(item.track.id) ?? 0}
+                isActive={item.track.id === activeTrack?.mediaId}
+                leadingNumber={item.track.trackNo ?? (indexById.get(item.track.id) ?? 0) + 1}
+                subtitle={item.track.artist ?? UNKNOWN_ARTIST}
+                onPlay={playFrom}
+                onLongPress={trackMenu.open}
+                selectionMode={selection.active}
+                selected={selection.isSelected(item.track.id)}
+                onToggleSelect={selection.toggle}
+                onQuickAction={quickActions.onQuickAction}
+                onQuickActionLongPress={quickActions.onQuickActionLongPress}
+                isFavorite={quickActions.isFavorite(item.track.id)}
+              />
+            </SwipeableRow>
           ) : (
             <GhostRow position={item.position} title={item.title} />
           )
@@ -234,6 +249,7 @@ export default function AlbumScreen() {
       {selection.footer}
 
       {trackMenu.element}
+      {quickActions.element}
 
       <PlaylistPickerSheet
         tracks={pickerTracks}

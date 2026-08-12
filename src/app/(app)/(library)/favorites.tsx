@@ -7,8 +7,10 @@ import { colors, radii, spacing, typography } from '@/theme';
 import { Icon } from '@/components/Icon';
 import { BackButton } from '@/components/BackButton';
 import { PressableScale } from '@/components/PressableScale';
+import { SwipeableRow } from '@/components/SwipeableRow';
 import { TrackIndexRow, trackRowLayout } from '@/components/TrackRow';
 import { useTrackActionsMenu } from '@/components/useTrackActionsMenu';
+import { useTrackQuickActions } from '@/components/useTrackQuickActions';
 import { useTrackSelection } from '@/components/useTrackSelection';
 import { PlaylistPickerSheet } from '@/components/PlaylistPickerSheet';
 import type { LocalTrack } from '@/library/useAudioLibrary';
@@ -59,6 +61,9 @@ export default function FavoritesScreen() {
   const [pickerTracks, setPickerTracks] = useState<LocalTrack[] | null>(null);
   const selection = useTrackSelection(tracks, { onAddToPlaylist: setPickerTracks });
   const trackMenu = useTrackActionsMenu({ onSelect: selection.start });
+  // Ici toutes les pistes sont déjà likées : le bouton de droite ouvre donc le sélecteur de
+  // playlists, et l'appui long retire des favoris (la ligne disparaît de l'écran).
+  const quickActions = useTrackQuickActions();
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + spacing.sm }]}>
@@ -112,16 +117,26 @@ export default function FavoritesScreen() {
           )
         }
         renderItem={({ item, index }) => (
-          <TrackIndexRow
-            track={item}
-            index={index}
-            isActive={item.id === activeTrack?.mediaId}
-            onPlay={playFrom}
-            onLongPress={trackMenu.open}
-            selectionMode={selection.active}
-            selected={selection.isSelected(item.id)}
-            onToggleSelect={selection.toggle}
-          />
+          <SwipeableRow
+            onSwipe={() => quickActions.onPlayNext(item)}
+            label="Lire ensuite"
+            icon="playlist_play"
+            enabled={!selection.active}
+          >
+            <TrackIndexRow
+              track={item}
+              index={index}
+              isActive={item.id === activeTrack?.mediaId}
+              onPlay={playFrom}
+              onLongPress={trackMenu.open}
+              selectionMode={selection.active}
+              selected={selection.isSelected(item.id)}
+              onToggleSelect={selection.toggle}
+              onQuickAction={quickActions.onQuickAction}
+              onQuickActionLongPress={quickActions.onQuickActionLongPress}
+              isFavorite={quickActions.isFavorite(item.id)}
+            />
+          </SwipeableRow>
         )}
         ListEmptyComponent={
           <View style={styles.empty}>
@@ -138,6 +153,7 @@ export default function FavoritesScreen() {
       {selection.footer}
 
       {trackMenu.element}
+      {quickActions.element}
 
       <PlaylistPickerSheet
         tracks={pickerTracks}

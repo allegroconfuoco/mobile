@@ -19,7 +19,9 @@ import { Icon, type IconName } from '@/components/Icon';
 import { MenuButton } from '@/components/MenuButton';
 import { SearchBar } from '@/components/SearchBar';
 import { SegmentedControl, type Segment } from '@/components/SegmentedControl';
+import { SwipeableRow } from '@/components/SwipeableRow';
 import { useTrackActionsMenu } from '@/components/useTrackActionsMenu';
+import { useTrackQuickActions, type TrackQuickActions } from '@/components/useTrackQuickActions';
 import { useTrackSelection, type TrackSelection } from '@/components/useTrackSelection';
 import { PlaylistNameDialog } from '@/components/PlaylistNameDialog';
 import { PlaylistPickerSheet } from '@/components/PlaylistPickerSheet';
@@ -129,7 +131,7 @@ export default function LibraryScreen() {
         )}
       </View>
 
-      {/* Reprise inter-appareils (#25) : bannière si un autre appareil a laissé une écoute en cours. */}
+      {/* Reprise locale : bannière si une écoute a été interrompue (piste + file + position). */}
       {hasContent && <ResumeCard />}
 
       {hasContent && <SegmentedControl segments={VIEWS} value={view} onChange={setView} />}
@@ -213,6 +215,8 @@ function LibraryContent({
   const selection = useTrackSelection(filteredTracks, { onAddToPlaylist: setPickerTracks });
   // Menu d'actions (long-press) : `onSelect` révèle « Sélectionner » (entre en mode sélection).
   const trackMenu = useTrackActionsMenu({ onSelect: selection.start });
+  // Actions rapides de ligne : bouton favori/playlist à droite, glissement « Lire ensuite ».
+  const quickActions = useTrackQuickActions();
 
   // Handlers stables (référence conservée entre rendus) : condition pour que le `memo` des lignes
   // de liste soit effectif — une closure recréée à chaque rendu invaliderait toutes les lignes.
@@ -247,6 +251,7 @@ function LibraryContent({
           refreshing={pulling}
           onRefresh={refreshAll}
           selection={selection}
+          quickActions={quickActions}
         />
       )}
       {view === 'artists' && (
@@ -272,6 +277,7 @@ function LibraryContent({
       )}
 
       {trackMenu.element}
+      {quickActions.element}
 
       <SortSheet
         visible={sortSheet}
@@ -415,6 +421,7 @@ function TracksView({
   refreshing,
   onRefresh,
   selection,
+  quickActions,
 }: {
   tracks: LocalTrack[];
   query: string;
@@ -427,24 +434,50 @@ function TracksView({
   onRefresh: () => void;
   /** Mode sélection multiple mutualisé (état + barres + actions groupées). */
   selection: TrackSelection;
+  /** Bouton du slot de droite + glissement « Lire ensuite » (cf. useTrackQuickActions). */
+  quickActions: TrackQuickActions;
 }) {
   const selectionMode = selection.active;
   const { isSelected, toggle } = selection;
+  const { onQuickAction, onQuickActionLongPress, onPlayNext, isFavorite } = quickActions;
 
   const renderItem = useCallback(
     ({ item, index }: { item: LocalTrack; index: number }) => (
-      <TrackIndexRow
-        track={item}
-        index={index}
-        isActive={item.id === activeId}
-        onPlay={onPlay}
-        onLongPress={selectionMode ? undefined : onLongPress}
-        selectionMode={selectionMode}
-        selected={isSelected(item.id)}
-        onToggleSelect={toggle}
-      />
+      // Le glissement est neutralisé en mode sélection : cocher des lignes et les faire glisser
+      // sont deux intentions incompatibles.
+      <SwipeableRow
+        onSwipe={() => onPlayNext(item)}
+        label="Lire ensuite"
+        icon="playlist_play"
+        enabled={!selectionMode}
+      >
+        <TrackIndexRow
+          track={item}
+          index={index}
+          isActive={item.id === activeId}
+          onPlay={onPlay}
+          onLongPress={selectionMode ? undefined : onLongPress}
+          selectionMode={selectionMode}
+          selected={isSelected(item.id)}
+          onToggleSelect={toggle}
+          onQuickAction={onQuickAction}
+          onQuickActionLongPress={onQuickActionLongPress}
+          isFavorite={isFavorite(item.id)}
+        />
+      </SwipeableRow>
     ),
-    [activeId, onPlay, onLongPress, selectionMode, isSelected, toggle]
+    [
+      activeId,
+      onPlay,
+      onLongPress,
+      selectionMode,
+      isSelected,
+      toggle,
+      onQuickAction,
+      onQuickActionLongPress,
+      onPlayNext,
+      isFavorite,
+    ]
   );
 
   return (

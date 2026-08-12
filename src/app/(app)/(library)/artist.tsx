@@ -7,9 +7,11 @@ import { useRouter } from '@/lib/useRouter';
 import { colors, radii, spacing, typography } from '@/theme';
 import { BackButton } from '@/components/BackButton';
 import { Icon } from '@/components/Icon';
+import { SwipeableRow } from '@/components/SwipeableRow';
 import { TrackIndexRow } from '@/components/TrackRow';
 import { QuickActionsSheet } from '@/components/QuickActionsSheet';
 import { useTrackActionsMenu } from '@/components/useTrackActionsMenu';
+import { useTrackQuickActions } from '@/components/useTrackQuickActions';
 import { useTrackSelection } from '@/components/useTrackSelection';
 import { PlaylistPickerSheet } from '@/components/PlaylistPickerSheet';
 import { buildAlbums, tracksForAlbum, UNKNOWN_ARTIST, type AlbumGroup } from '@/library/grouping';
@@ -70,6 +72,7 @@ export default function ArtistScreen() {
   const [pickerTracks, setPickerTracks] = useState<LocalTrack[] | null>(null);
   const selection = useTrackSelection(queue, { onAddToPlaylist: setPickerTracks });
   const trackMenu = useTrackActionsMenu({ onSelect: selection.start });
+  const quickActions = useTrackQuickActions();
 
   const [actionsOpen, setActionsOpen] = useState(false);
 
@@ -137,19 +140,29 @@ export default function ArtistScreen() {
           />
         )}
         renderItem={({ item, index }) => (
-          <TrackIndexRow
-            track={item}
-            index={indexById.get(item.id) ?? 0}
-            isActive={item.id === activeTrack?.mediaId}
-            leadingNumber={item.trackNo ?? index + 1}
-            // L'album est déjà dans l'en-tête de section : sous-titre masqué pour ne pas répéter.
-            subtitle=""
-            onPlay={playFrom}
-            onLongPress={trackMenu.open}
-            selectionMode={selection.active}
-            selected={selection.isSelected(item.id)}
-            onToggleSelect={selection.toggle}
-          />
+          <SwipeableRow
+            onSwipe={() => quickActions.onPlayNext(item)}
+            label="Lire ensuite"
+            icon="playlist_play"
+            enabled={!selection.active}
+          >
+            <TrackIndexRow
+              track={item}
+              index={indexById.get(item.id) ?? 0}
+              isActive={item.id === activeTrack?.mediaId}
+              leadingNumber={item.trackNo ?? index + 1}
+              // L'album est déjà dans l'en-tête de section : sous-titre masqué pour ne pas répéter.
+              subtitle=""
+              onPlay={playFrom}
+              onLongPress={trackMenu.open}
+              selectionMode={selection.active}
+              selected={selection.isSelected(item.id)}
+              onToggleSelect={selection.toggle}
+              onQuickAction={quickActions.onQuickAction}
+              onQuickActionLongPress={quickActions.onQuickActionLongPress}
+              isFavorite={quickActions.isFavorite(item.id)}
+            />
+          </SwipeableRow>
         )}
         windowSize={7}
         ListEmptyComponent={<Text style={styles.empty}>Artiste introuvable.</Text>}
@@ -160,6 +173,7 @@ export default function ArtistScreen() {
       {selection.footer}
 
       {trackMenu.element}
+      {quickActions.element}
 
       <PlaylistPickerSheet
         tracks={pickerTracks}
