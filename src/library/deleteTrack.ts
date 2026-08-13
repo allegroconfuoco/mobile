@@ -28,3 +28,24 @@ export async function deleteTrackFromDevice(track: LocalTrack): Promise<boolean>
   db.deleteTracks([track.id]);
   return true;
 }
+
+/**
+ * Supprime **plusieurs** fichiers du téléphone en un seul dialogue de consentement système.
+ * `Asset.delete(assets)` (media-library « Next ») groupe tout le lot dans une seule demande
+ * MediaStore : l'utilisateur approuve ou refuse **l'ensemble** (tout-ou-rien). `true` si supprimé,
+ * `false` si refusé/échoué (rien touché). Après suppression on purge les lignes `tracks` locales.
+ */
+export async function deleteTracksFromDevice(tracks: LocalTrack[]): Promise<boolean> {
+  if (tracks.length === 0) {
+    return true;
+  }
+  try {
+    await Asset.delete(tracks.map((t) => new Asset(t.id)));
+  } catch (e) {
+    // Refus du dialogue système ou échec d'IO : on ne touche à rien.
+    console.warn('[deleteTrack] batch', e);
+    return false;
+  }
+  db.deleteTracks(tracks.map((t) => t.id));
+  return true;
+}

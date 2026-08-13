@@ -10,17 +10,21 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useLocalSearchParams } from 'expo-router';
 import { useRouter } from '@/lib/useRouter';
 
-import { colors, spacing, typography } from '@/theme';
+import { colors, radii, spacing, typography } from '@/theme';
+import { BottomSheet } from '@/components/BottomSheet';
 import { Icon, type IconName } from '@/components/Icon';
+import { MenuButton } from '@/components/MenuButton';
 import { SearchBar } from '@/components/SearchBar';
 import { SegmentedControl, type Segment } from '@/components/SegmentedControl';
-import { showToast } from '@/components/Toast';
+import { SwipeableRow } from '@/components/SwipeableRow';
 import { useTrackActionsMenu } from '@/components/useTrackActionsMenu';
+import { useTrackQuickActions, type TrackQuickActions } from '@/components/useTrackQuickActions';
+import { useTrackSelection, type TrackSelection } from '@/components/useTrackSelection';
 import { PlaylistNameDialog } from '@/components/PlaylistNameDialog';
 import { PlaylistPickerSheet } from '@/components/PlaylistPickerSheet';
-import { tapLight } from '@/lib/haptics';
 import { ResumeCard } from '@/components/ResumeCard';
 import { TrackCover } from '@/components/TrackCover';
 import { TrackIndexRow, trackRowLayout } from '@/components/TrackRow';
@@ -59,15 +63,28 @@ const SEARCH_PLACEHOLDER: Record<LibraryView, string> = {
   playlists: 'Rechercher une playlist',
 };
 
-/** Onglet Bibliothèque : morceaux / artistes / albums de la musique locale. */
+/** Une valeur de vue valide, ou `tracks` par défaut (param d'URL d'entrée depuis le menu latéral). */
+function parseView(value: string | undefined): LibraryView {
+  return value === 'artists' || value === 'albums' || value === 'playlists' ? value : 'tracks';
+}
+
+/** Écran Bibliothèque : morceaux / artistes / albums / playlists de la musique locale.
+ *  La vue de départ vient du param `view` (entrée du menu latéral) ; le segmented control laisse
+ *  ensuite basculer entre vues sans rouvrir le menu. */
 export default function LibraryScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const library = useLibrary();
   const { status, tracks, refreshing, error, rescan } = library;
   const { lastSync } = useSync();
-  const [view, setView] = useState<LibraryView>('tracks');
+  const params = useLocalSearchParams<{ view?: string; q?: string }>();
+  // Vue initiale = param d'entrée. L'écran est remonté à chaque entrée depuis le menu (pile remise
+  // à plat), donc lire le param au montage suffit ; le segmented control gère la suite localement.
+  const [view, setView] = useState<LibraryView>(() => parseView(params.view));
   const [query, setQuery] = useState('');
+  // `q=1` : entrée depuis la loupe de l'accueil, on ouvre directement le clavier. Lu au montage
+  // comme `view`, l'écran étant remonté à chaque entrée (pile remise à plat).
+  const [autoFocusSearch] = useState(() => params.q === '1');
 
   // Indicateur hors-ligne discret (lot 6) : la dernière tentative de synchro a échoué.
   const syncTrouble = lastSync !== null && lastSync.result !== 'ok';
@@ -88,6 +105,7 @@ export default function LibraryScreen() {
   return (
     <View style={[styles.screen, { paddingTop: insets.top + spacing.md }]}>
       <View style={styles.header}>
+        <MenuButton />
         <View style={{ flex: 1 }}>
           <Text style={styles.title}>Bibliothèque</Text>
           <Text style={styles.subtitle}>{subtitle}</Text>
@@ -116,13 +134,18 @@ export default function LibraryScreen() {
         )}
       </View>
 
-      {/* Reprise inter-appareils (#25) : bannière si un autre appareil a laissé une écoute en cours. */}
+      {/* Reprise locale : bannière si une écoute a été interrompue (piste + file + position). */}
       {hasContent && <ResumeCard />}
 
       {hasContent && <SegmentedControl segments={VIEWS} value={view} onChange={setView} />}
 
       {hasContent && (
-        <SearchBar value={query} onChangeText={setQuery} placeholder={SEARCH_PLACEHOLDER[view]} />
+        <SearchBar
+          value={query}
+          onChangeText={setQuery}
+          placeholder={SEARCH_PLACEHOLDER[view]}
+          autoFocus={autoFocusSearch}
+        />
       )}
 
       {hasContent ? (
@@ -150,15 +173,15 @@ function themedRefresh(refreshing: boolean, onRefresh: () => void) {
   );
 }
 
-/** Cycle de tri des morceaux : titre → artiste → ajouts récents. */
-function nextSort(sort: TrackSort): TrackSort {
-  if (sort === 'title') {
-    return 'artist';
-  }
-  if (sort === 'artist') {
-    return 'recent';
-  }
-  return 'title';
+/** Libellés des critères de tri, dans l'ordre d'affichage de la feuille. */
+const SORT_OPTIONS: { key: TrackSort; label: string; icon: IconName }[] = [
+  { key: 'title', label: 'Titre', icon: 'sort' },
+  { key: 'artist', label: 'Artiste', icon: 'person' },
+  { key: 'recent', label: 'Ajouts récents', icon: 'history' },
+];
+
+function sortLabel(sort: TrackSort): string {
+  return SORT_OPTIONS.find((o) => o.key === sort)?.label ?? 'Titre';
 }
 
 function LibraryContent({
@@ -172,7 +195,7 @@ function LibraryContent({
 }) {
   const { tracks, artists, albums, trackSort, setTrackSort, refreshing, rescan } = library;
   const router = useRouter();
-  const { playQueue, playNext, addToQueue } = usePlayer();
+  const { playQueue } = usePlayer();
   const { status: syncStatus, syncNow } = useSync();
   const activeTrack = useActiveTrack();
 
@@ -185,72 +208,23 @@ function LibraryContent({
   }, [rescan, syncNow]);
   const pulling = refreshing || syncStatus === 'syncing';
 
-  // Mode sélection multiple (vue Morceaux) : `null` = mode normal. Entré via l'action
-  // « Sélectionner » du menu long-press, sorti par « Annuler » ou après une action réussie.
-  const [selection, setSelection] = useState<ReadonlySet<string> | null>(null);
-  // Pistes en attente dans le sélecteur de playlist (action groupée du mode sélection).
-  const [pickerTracks, setPickerTracks] = useState<LocalTrack[] | null>(null);
-
-  const startSelection = useCallback((track: LocalTrack) => setSelection(new Set([track.id])), []);
-  // Menu d'actions (long-press) mutualisé : ouverture + feuilles rendues via `trackMenu.element`.
-  const trackMenu = useTrackActionsMenu({ onSelect: startSelection });
-
   // Résultats filtrés par la recherche (temps réel). Requête vide = listes complètes.
   const filteredTracks = useMemo(() => filterTracks(tracks, query), [tracks, query]);
   const filteredArtists = useMemo(() => filterArtists(artists, query), [artists, query]);
   const filteredAlbums = useMemo(() => filterAlbums(albums, query), [albums, query]);
 
-  const toggleSelect = useCallback((track: LocalTrack) => {
-    setSelection((prev) => {
-      if (!prev) {
-        return prev;
-      }
-      const next = new Set(prev);
-      if (next.has(track.id)) {
-        next.delete(track.id);
-      } else {
-        next.add(track.id);
-      }
-      return next;
-    });
-  }, []);
+  // Pistes en attente dans le sélecteur de playlist (action groupée du mode sélection).
+  const [pickerTracks, setPickerTracks] = useState<LocalTrack[] | null>(null);
+  // Feuille de choix du tri (vue Morceaux).
+  const [sortSheet, setSortSheet] = useState(false);
 
-  const cancelSelection = useCallback(() => setSelection(null), []);
-
-  // Pistes sélectionnées dans l'ordre d'affichage courant (tri de la bibliothèque), pas dans
-  // l'ordre des taps : « Lire ensuite » sur 10 titres doit respecter l'ordre de la liste.
-  const selectedTracks = useMemo(
-    () => (selection ? tracks.filter((t) => selection.has(t.id)) : []),
-    [tracks, selection]
-  );
-
-  const playNextSelected = () => {
-    if (selectedTracks.length > 0) {
-      tapLight();
-      void playNext(selectedTracks);
-      showToast(
-        selectedTracks.length > 1
-          ? `${selectedTracks.length} titres liront ensuite`
-          : 'Lira ensuite',
-        'queue_music'
-      );
-      setSelection(null);
-    }
-  };
-
-  const addSelectedToQueue = () => {
-    if (selectedTracks.length > 0) {
-      tapLight();
-      void addToQueue(selectedTracks);
-      showToast(
-        selectedTracks.length > 1
-          ? `${selectedTracks.length} titres ajoutés à la file`
-          : 'Ajouté à la file',
-        'queue_music'
-      );
-      setSelection(null);
-    }
-  };
+  // Mode sélection multiple mutualisé (hook partagé, cf. useTrackSelection) : « Tout » et l'ordre
+  // des actions groupées portent sur la liste **filtrée** affichée.
+  const selection = useTrackSelection(filteredTracks, { onAddToPlaylist: setPickerTracks });
+  // Menu d'actions (long-press) : `onSelect` révèle « Sélectionner » (entre en mode sélection).
+  const trackMenu = useTrackActionsMenu({ onSelect: selection.start });
+  // Actions rapides de ligne : bouton favori/playlist à droite, glissement « Lire ensuite ».
+  const quickActions = useTrackQuickActions();
 
   // Handlers stables (référence conservée entre rendus) : condition pour que le `memo` des lignes
   // de liste soit effectif — une closure recréée à chaque rendu invaliderait toutes les lignes.
@@ -279,18 +253,13 @@ function LibraryContent({
           query={query}
           activeId={activeTrack?.mediaId}
           sort={trackSort}
-          onToggleSort={() => setTrackSort(nextSort(trackSort))}
+          onOpenSort={() => setSortSheet(true)}
           onPlay={playFromFiltered}
           onLongPress={trackMenu.open}
           refreshing={pulling}
           onRefresh={refreshAll}
           selection={selection}
-          onToggleSelect={toggleSelect}
-          onSelectionChange={setSelection}
-          onCancelSelection={cancelSelection}
-          onAddSelectedToPlaylist={() => setPickerTracks(selectedTracks)}
-          onPlayNextSelected={playNextSelected}
-          onAddSelectedToQueue={addSelectedToQueue}
+          quickActions={quickActions}
         />
       )}
       {view === 'artists' && (
@@ -316,13 +285,21 @@ function LibraryContent({
       )}
 
       {trackMenu.element}
+      {quickActions.element}
+
+      <SortSheet
+        visible={sortSheet}
+        sort={trackSort}
+        onSelect={setTrackSort}
+        onClose={() => setSortSheet(false)}
+      />
 
       {/* Sélecteur de playlist du mode sélection (multi-titres) : distinct de celui du menu
           long-press (une seule piste), la sortie du mode ne se fait qu'après un ajout réussi. */}
       <PlaylistPickerSheet
         tracks={pickerTracks}
         onClose={() => setPickerTracks(null)}
-        onAdded={cancelSelection}
+        onAdded={selection.cancel}
       />
     </>
   );
@@ -446,107 +423,79 @@ function TracksView({
   query,
   activeId,
   sort,
-  onToggleSort,
+  onOpenSort,
   onPlay,
   onLongPress,
   refreshing,
   onRefresh,
   selection,
-  onToggleSelect,
-  onSelectionChange,
-  onCancelSelection,
-  onAddSelectedToPlaylist,
-  onPlayNextSelected,
-  onAddSelectedToQueue,
+  quickActions,
 }: {
   tracks: LocalTrack[];
   query: string;
   activeId: string | undefined;
   sort: TrackSort;
-  onToggleSort: () => void;
+  onOpenSort: () => void;
   onPlay: (index: number) => void;
   onLongPress: (track: LocalTrack) => void;
   refreshing: boolean;
   onRefresh: () => void;
-  /** Ids sélectionnés, ou `null` hors mode sélection. */
-  selection: ReadonlySet<string> | null;
-  onToggleSelect: (track: LocalTrack) => void;
-  onSelectionChange: (next: ReadonlySet<string>) => void;
-  onCancelSelection: () => void;
-  onAddSelectedToPlaylist: () => void;
-  onPlayNextSelected: () => void;
-  onAddSelectedToQueue: () => void;
+  /** Mode sélection multiple mutualisé (état + barres + actions groupées). */
+  selection: TrackSelection;
+  /** Bouton du slot de droite + glissement « Lire ensuite » (cf. useTrackQuickActions). */
+  quickActions: TrackQuickActions;
 }) {
-  const selectionMode = selection !== null;
+  const selectionMode = selection.active;
+  const { isSelected, toggle } = selection;
+  const { onQuickAction, onQuickActionLongPress, onPlayNext, isFavorite } = quickActions;
 
   const renderItem = useCallback(
     ({ item, index }: { item: LocalTrack; index: number }) => (
-      <TrackIndexRow
-        track={item}
-        index={index}
-        isActive={item.id === activeId}
-        onPlay={onPlay}
-        onLongPress={selectionMode ? undefined : onLongPress}
-        selectionMode={selectionMode}
-        selected={selection?.has(item.id) ?? false}
-        onToggleSelect={onToggleSelect}
-      />
+      // Le glissement est neutralisé en mode sélection : cocher des lignes et les faire glisser
+      // sont deux intentions incompatibles.
+      <SwipeableRow
+        onSwipe={() => onPlayNext(item)}
+        label="Lire ensuite"
+        icon="playlist_play"
+        enabled={!selectionMode}
+      >
+        <TrackIndexRow
+          track={item}
+          index={index}
+          isActive={item.id === activeId}
+          onPlay={onPlay}
+          onLongPress={selectionMode ? undefined : onLongPress}
+          selectionMode={selectionMode}
+          selected={isSelected(item.id)}
+          onToggleSelect={toggle}
+          onQuickAction={onQuickAction}
+          onQuickActionLongPress={onQuickActionLongPress}
+          isFavorite={isFavorite(item.id)}
+        />
+      </SwipeableRow>
     ),
-    [activeId, onPlay, onLongPress, selectionMode, selection, onToggleSelect]
+    [
+      activeId,
+      onPlay,
+      onLongPress,
+      selectionMode,
+      isSelected,
+      toggle,
+      onQuickAction,
+      onQuickActionLongPress,
+      onPlayNext,
+      isFavorite,
+    ]
   );
-
-  // « Tout » porte sur la liste affichée (donc filtrée) ; re-tap = tout désélectionner.
-  const allVisibleSelected =
-    selectionMode && tracks.length > 0 && tracks.every((t) => selection.has(t.id));
-  const toggleAllVisible = () => {
-    if (!selectionMode) {
-      return;
-    }
-    const next = new Set(selection);
-    if (allVisibleSelected) {
-      for (const t of tracks) {
-        next.delete(t.id);
-      }
-    } else {
-      for (const t of tracks) {
-        next.add(t.id);
-      }
-    }
-    onSelectionChange(next);
-  };
-
-  const count = selection?.size ?? 0;
 
   return (
     <>
       {/* Barre de tri hors liste : hauteur d'items constante → `getItemLayout` exact. On la masque
           quand une recherche ne renvoie rien (seul le message reste). En mode sélection, elle cède
           la place à la barre de sélection (compteur + Tout + Annuler). */}
-      {selectionMode ? (
-        <View style={styles.selectionBar}>
-          <Text style={styles.selectionCount}>
-            {count} sélectionné{count > 1 ? 's' : ''}
-          </Text>
-          <Pressable
-            onPress={toggleAllVisible}
-            hitSlop={8}
-            style={styles.selectionAction}
-            accessibilityRole="button"
-          >
-            <Text style={styles.selectionActionLabel}>{allVisibleSelected ? 'Aucun' : 'Tout'}</Text>
-          </Pressable>
-          <Pressable
-            onPress={onCancelSelection}
-            hitSlop={8}
-            style={styles.selectionAction}
-            accessibilityRole="button"
-          >
-            <Text style={styles.selectionActionLabel}>Annuler</Text>
-          </Pressable>
-        </View>
-      ) : (
-        !(query && tracks.length === 0) && <SortBar sort={sort} onToggle={onToggleSort} />
-      )}
+      {selectionMode
+        ? selection.header
+        : !(query && tracks.length === 0) && <SortBar sort={sort} onOpen={onOpenSort} />}
       <FlatList
         data={tracks}
         keyExtractor={trackKey}
@@ -560,78 +509,70 @@ function TracksView({
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
       />
-      {selectionMode && (
-        <View style={styles.selectionFooter}>
-          <SelectionFooterAction
-            icon="playlist_add_check"
-            label="Playlist"
-            disabled={count === 0}
-            onPress={onAddSelectedToPlaylist}
-          />
-          <SelectionFooterAction
-            icon="playlist_play"
-            label="Lire ensuite"
-            disabled={count === 0}
-            onPress={onPlayNextSelected}
-          />
-          <SelectionFooterAction
-            icon="playlist_add"
-            label="File"
-            disabled={count === 0}
-            onPress={onAddSelectedToQueue}
-          />
-        </View>
-      )}
+      {selection.footer}
     </>
   );
 }
 
-/** Action de la barre du mode sélection (icône + libellé court, désactivée si sélection vide). */
-function SelectionFooterAction({
-  icon,
-  label,
-  disabled,
-  onPress,
-}: {
-  icon: IconName;
-  label: string;
-  disabled: boolean;
-  onPress: () => void;
-}) {
+/**
+ * Barre de tri de la liste des morceaux. Ouvre une feuille de choix plutôt que de cycler entre les
+ * critères : atteindre « Ajouts récents » coûtait jusqu'à trois taps, il en faut désormais un.
+ */
+function SortBar({ sort, onOpen }: { sort: TrackSort; onOpen: () => void }) {
+  const label = sortLabel(sort);
   return (
     <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      style={({ pressed }) => [
-        styles.selectionFooterAction,
-        pressed && styles.rowPressed,
-        disabled && styles.selectionFooterDisabled,
-      ]}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ disabled }}
-    >
-      <Icon name={icon} size={22} color={colors.accentIcon} />
-      <Text style={styles.selectionFooterLabel}>{label}</Text>
-    </Pressable>
-  );
-}
-
-/** Barre de tri de la liste des morceaux (cycle titre / artiste / ajouts récents). */
-function SortBar({ sort, onToggle }: { sort: TrackSort; onToggle: () => void }) {
-  const label = sort === 'title' ? 'Titre' : sort === 'artist' ? 'Artiste' : 'Ajouts récents';
-  return (
-    <Pressable
-      onPress={onToggle}
+      onPress={onOpen}
       style={styles.sortBar}
       accessibilityRole="button"
-      accessibilityLabel={`Trier par ${label}. Toucher pour changer.`}
+      accessibilityLabel={`Trier par ${label}. Toucher pour choisir un autre tri.`}
     >
       <Icon name="sort" size={18} color={colors.textSecondary} />
       <Text style={styles.sortLabel}>
         Tri : <Text style={styles.sortValue}>{label}</Text>
       </Text>
+      <Icon name="expand_more" size={18} color={colors.textMuted} />
     </Pressable>
+  );
+}
+
+/** Feuille de choix du tri : les trois critères, celui en cours coché. */
+function SortSheet({
+  visible,
+  sort,
+  onSelect,
+  onClose,
+}: {
+  visible: boolean;
+  sort: TrackSort;
+  onSelect: (sort: TrackSort) => void;
+  onClose: () => void;
+}) {
+  return (
+    <BottomSheet visible={visible} onClose={onClose}>
+      <Text style={styles.sortSheetHeader}>Trier les morceaux</Text>
+      {SORT_OPTIONS.map((option) => {
+        const current = option.key === sort;
+        return (
+          <Pressable
+            key={option.key}
+            onPress={() => {
+              onClose();
+              onSelect(option.key);
+            }}
+            android_ripple={{ color: colors.borderStrong }}
+            style={({ pressed }) => [styles.sortSheetRow, pressed && styles.sortSheetRowPressed]}
+            accessibilityRole="radio"
+            accessibilityState={{ selected: current }}
+            accessibilityLabel={option.label}
+          >
+            <Icon name={option.icon} size={22} color={colors.accentIcon} />
+            <Text style={styles.sortSheetLabel}>{option.label}</Text>
+            {current && <Icon name="check" size={20} color={colors.accent} />}
+          </Pressable>
+        );
+      })}
+    </BottomSheet>
   );
 }
 
@@ -950,48 +891,6 @@ const styles = StyleSheet.create({
     paddingTop: spacing.md,
     paddingBottom: spacing.sm,
   },
-  selectionBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.lg,
-    paddingHorizontal: spacing.xxl,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.sm,
-  },
-  selectionCount: {
-    ...typography.heading,
-    fontSize: 14,
-    flex: 1,
-  },
-  selectionAction: {
-    paddingVertical: spacing.xs,
-  },
-  selectionActionLabel: {
-    fontFamily: typography.heading.fontFamily,
-    fontSize: 13,
-    color: colors.accentLabel,
-  },
-  selectionFooter: {
-    flexDirection: 'row',
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  selectionFooterAction: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 2,
-    paddingVertical: spacing.md,
-  },
-  selectionFooterDisabled: {
-    opacity: 0.4,
-  },
-  selectionFooterLabel: {
-    ...typography.body,
-    fontSize: 11.5,
-    color: colors.textSecondary,
-  },
   sortLabel: {
     ...typography.body,
     fontSize: 12,
@@ -1000,6 +899,31 @@ const styles = StyleSheet.create({
   sortValue: {
     color: colors.textSecondary,
     fontFamily: typography.heading.fontFamily,
+  },
+  sortSheetHeader: {
+    ...typography.label,
+    color: colors.textMuted,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
+  },
+  // Même gabarit que QuickActionsSheet / TrackActionsSheet : les feuilles doivent être
+  // indiscernables à l'œil.
+  sortSheetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.lg,
+    borderRadius: radii.sm,
+  },
+  // Le fond de la feuille étant déjà `surface`, l'état pressé s'enfonce vers `background`.
+  sortSheetRowPressed: {
+    backgroundColor: colors.background,
+  },
+  sortSheetLabel: {
+    ...typography.heading,
+    flex: 1,
+    fontSize: 15,
   },
   artistRow: {
     flexDirection: 'row',

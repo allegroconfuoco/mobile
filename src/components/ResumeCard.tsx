@@ -4,69 +4,81 @@ import { useFocusEffect } from 'expo-router';
 
 import { colors, radii, spacing, typography } from '@/theme';
 import { Icon } from '@/components/Icon';
+import { TrackCover } from '@/components/TrackCover';
 import { formatClock } from '@/history/format';
-import * as db from '@/library/db';
 import { useLibrary } from '@/library/LibraryProvider';
 import type { LocalTrack } from '@/library/useAudioLibrary';
 import { usePlayer } from '@/player/PlayerProvider';
-import { REMOTE_STATE_KEY } from '@/sync/playSync';
-import type { PlaybackStatePull } from '@/sync/syncTypes';
+import {
+  dismissResumePoint,
+  isResumeDismissed,
+  loadResumePoint,
+  type ResumePoint,
+} from '@/player/resumeState';
 
 /**
- * Carte « Reprendre » (handoff inter-appareils, issue #25) : si un autre appareil a poussé un
- * état de lecture plus frais que la dernière activité locale, propose de reprendre la piste à
- * la seconde près — à condition que le fichier existe ici (résolution via `track_registry`,
- * jamais de transfert d'audio). Rendue en bannière sur l'index bibliothèque.
+ * Carte « Reprendre » : relance la dernière écoute **avec sa file d'attente**, à la seconde près.
+ *
+ * Purement local (clé `app_settings`, cf. `resumeState`) : le handoff inter-appareils de l'issue
+ * #25 a été retiré. On ne reprend donc plus « ce que l'autre téléphone écoutait » mais ce que *ce*
+ * téléphone écoutait avant d'être fermé — le seul cas qui servait vraiment.
+ *
+ * Le point de reprise ne stocke que des ids : la résolution se fait ici contre la bibliothèque
+ * courante, et les fichiers disparus depuis sont simplement omis (l'index se recale sur la piste
+ * active, ou sur la suivante encore présente).
  */
 
 // Au-delà, la proposition n'a plus de sens (on ne « reprend » pas une écoute d'il y a 15 jours).
 const FRESHNESS_MS = 7 * 86_400_000;
 
-type Resume = {
-  track: LocalTrack;
+export type Resume = {
+  /** File résolue contre la bibliothèque locale, dans l'ordre. */
+  tracks: LocalTrack[];
+  /** Index de reprise dans `tracks` (recalé après omission des fichiers disparus). */
+  index: number;
   positionMs: number;
-  deviceName: string | null;
-  /** Jeton de rejet : l'updatedAt distant, mémorisé quand l'utilisateur ferme la carte. */
-  stamp: string;
+  point: ResumePoint;
 };
 
-/** Relit l'état distant et décide si la carte doit se montrer. */
-function computeResume(tracksById: Map<string, LocalTrack>): Resume | null {
-  const raw = db.getSyncState(REMOTE_STATE_KEY);
-  if (!raw) {
+/**
+ * Résout le point de reprise contre la bibliothèque, ou renvoie `null` s'il n'y a rien à proposer.
+ * Exporté pour l'accueil, qui affiche la même reprise sous forme de tuile.
+ */
+export function computeResume(tracksById: Map<string, LocalTrack>): Resume | null {
+  const point = loadResumePoint();
+  if (!point) {
     return null;
   }
-  let state: PlaybackStatePull;
-  try {
-    state = JSON.parse(raw) as PlaybackStatePull;
-  } catch {
+  if (Date.now() - point.updatedAt > FRESHNESS_MS || isResumeDismissed(point)) {
     return null;
   }
-  if (!state.trackId || !state.updatedAt || state.positionMs <= 0) {
+
+  // Résolution + recalage de l'index : on garde l'ordre, on saute les fichiers disparus, et
+  // l'index vise la piste active si elle est encore là, sinon la première suivante disponible.
+  const tracks: LocalTrack[] = [];
+  let index = -1;
+  for (let i = 0; i < point.trackIds.length; i++) {
+    const track = tracksById.get(point.trackIds[i]);
+    if (!track) {
+      continue;
+    }
+    if (index === -1 && i >= point.index) {
+      index = tracks.length;
+    }
+    tracks.push(track);
+  }
+  if (tracks.length === 0) {
     return null;
   }
-  const updatedMs = new Date(state.updatedAt).getTime();
-  if (Number.isNaN(updatedMs) || Date.now() - updatedMs > FRESHNESS_MS) {
-    return null;
-  }
-  // Plus frais que la dernière activité locale, sinon c'est notre propre écho.
-  const lastLocal = Number(db.getSetting('playback.lastLocalAt') ?? '0');
-  if (updatedMs <= lastLocal) {
-    return null;
-  }
-  if (db.getSetting('handoff.dismissedAt') === state.updatedAt) {
-    return null;
-  }
-  const localId = db.localIdForShared(state.trackId);
-  const track = localId ? tracksById.get(localId) : undefined;
-  if (!track) {
-    return null; // Fichier absent de cet appareil : rien à proposer (l'audio ne circule pas).
-  }
+  // La piste active exacte a disparu et rien ne suivait : on reprend au début de ce qui reste.
+  const resolvedIndex = index === -1 ? 0 : index;
+  // Reprendre à la position n'a de sens que sur la piste réellement interrompue.
+  const exact = tracksById.get(point.trackIds[point.index]) !== undefined;
   return {
-    track,
-    positionMs: state.positionMs,
-    deviceName: state.deviceName,
-    stamp: state.updatedAt,
+    tracks,
+    index: resolvedIndex,
+    positionMs: exact ? point.positionMs : 0,
+    point,
   };
 }
 
@@ -75,7 +87,8 @@ export function ResumeCard() {
   const { playQueue, seekTo } = usePlayer();
   const [resume, setResume] = useState<Resume | null>(null);
 
-  // Recalculé au focus : l'état distant arrive par la synchro (connexion, premier plan…).
+  // Recalculé au focus : le point de reprise est écrit par les événements du lecteur, y compris
+  // pendant que cet écran n'est pas monté.
   useFocusEffect(
     useCallback(() => {
       setResume(computeResume(tracksById));
@@ -86,34 +99,43 @@ export function ResumeCard() {
     return null;
   }
 
+  const track = resume.tracks[resume.index];
+  const remaining = resume.tracks.length - resume.index - 1;
+
   const dismiss = () => {
-    db.setSetting('handoff.dismissedAt', resume.stamp);
+    dismissResumePoint(resume.point);
     setResume(null);
   };
 
   const play = () => {
     const positionMs = resume.positionMs;
-    void playQueue([resume.track], 0, 'resume').then(() => {
-      seekTo(positionMs / 1000);
+    void playQueue(resume.tracks, resume.index, 'resume').then(() => {
+      if (positionMs > 0) {
+        seekTo(positionMs / 1000);
+      }
     });
-    dismiss();
+    setResume(null);
   };
 
   return (
     <View style={styles.card}>
-      <Icon name="cast" size={22} color={colors.accentIcon} />
+      <TrackCover
+        uri={track.artworkUri ?? track.coverArtUrl}
+        size={40}
+        seed={`${track.title}${track.artist ?? ''}`}
+      />
       <Pressable
         onPress={play}
         style={styles.body}
         accessibilityRole="button"
-        accessibilityLabel={`Reprendre ${resume.track.title} à ${formatClock(resume.positionMs)}`}
+        accessibilityLabel={`Reprendre ${track.title} à ${formatClock(resume.positionMs)}`}
       >
         <Text style={styles.title} numberOfLines={1}>
-          Reprendre « {resume.track.title} »
+          Reprendre « {track.title} »
         </Text>
         <Text style={styles.hint} numberOfLines={1}>
           à {formatClock(resume.positionMs)}
-          {resume.deviceName ? ` · depuis ${resume.deviceName}` : ''}
+          {remaining > 0 ? ` · ${remaining} titre${remaining > 1 ? 's' : ''} à suivre` : ''}
         </Text>
       </Pressable>
       <Pressable

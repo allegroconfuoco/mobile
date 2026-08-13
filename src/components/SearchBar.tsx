@@ -13,9 +13,19 @@ export type SearchBarProps = {
   value: string;
   onChangeText: (text: string) => void;
   placeholder?: string;
+  /**
+   * Ouvre le clavier au montage. Sert à l'entrée « Rechercher » de l'accueil, qui doit amener
+   * directement au champ actif plutôt qu'à un écran où il reste un tap à faire.
+   */
+  autoFocus?: boolean;
 };
 
-export function SearchBar({ value, onChangeText, placeholder = 'Rechercher' }: SearchBarProps) {
+export function SearchBar({
+  value,
+  onChangeText,
+  placeholder = 'Rechercher',
+  autoFocus = false,
+}: SearchBarProps) {
   return (
     <View style={styles.container}>
       <Icon name="search" size={20} color={colors.textMuted} />
@@ -24,6 +34,7 @@ export function SearchBar({ value, onChangeText, placeholder = 'Rechercher' }: S
         onChangeText={onChangeText}
         placeholder={placeholder}
         placeholderTextColor={colors.textMuted}
+        autoFocus={autoFocus}
         style={styles.input}
         selectionColor={colors.accent}
         returnKeyType="search"

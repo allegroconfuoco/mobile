@@ -41,13 +41,23 @@ type TrackRowProps = {
   /** Sous-titre custom ; par défaut « artiste · album ». */
   subtitle?: string;
   /**
-   * Mode sélection multiple : la durée cède la place à une checkbox et le tap coche/décoche
-   * (le handler `onPress` fourni par l'appelant porte alors la bascule). Props primitives pour
-   * préserver le `memo` ; la hauteur de ligne (`TRACK_ROW_HEIGHT`) ne change pas.
+   * Mode sélection multiple : le slot de droite cède la place à une checkbox et le tap
+   * coche/décoche (le handler `onPress` fourni par l'appelant porte alors la bascule). Props
+   * primitives pour préserver le `memo` ; la hauteur (`TRACK_ROW_HEIGHT`) ne change pas.
    */
   selectionMode?: boolean;
   /** Piste cochée (mode sélection). */
   selected?: boolean;
+  /**
+   * Bouton d'action rapide dans le slot de droite. Non fourni = pas de bouton (file d'attente,
+   * listes réordonnables). Tap : ajoute aux favoris si la piste n'y est pas, sinon ouvre le
+   * sélecteur de playlists. Appui long : retire des favoris. Deux gestes courants qui coûtaient
+   * chacun un appui long + une feuille.
+   */
+  onQuickAction?: () => void;
+  onQuickActionLongPress?: () => void;
+  /** État favori, qui pilote l'icône du bouton d'action rapide. */
+  isFavorite?: boolean;
 };
 
 /**
@@ -67,8 +77,16 @@ export const TrackRow = memo(function TrackRow({
   subtitle,
   selectionMode = false,
   selected = false,
+  onQuickAction,
+  onQuickActionLongPress,
+  isFavorite = false,
 }: TrackRowProps) {
-  const meta = subtitle ?? defaultSubtitle(track);
+  // La durée vit dans le sous-titre : le slot de droite est désormais actionnable, et « 3:42 »
+  // se lit très bien en fin de ligne méta. Un `subtitle=""` explicite (vue artiste, où l'album est
+  // déjà dans l'en-tête de section) ne doit pas laisser de séparateur orphelin.
+  const meta = [subtitle ?? defaultSubtitle(track), formatDuration(track.durationMs)]
+    .filter((part) => part.length > 0)
+    .join(' · ');
   const showNumber = leadingNumber !== undefined;
 
   return (
@@ -116,11 +134,32 @@ export const TrackRow = memo(function TrackRow({
         <View style={[styles.checkbox, selected && styles.checkboxOn]}>
           {selected && <Icon name="check" size={16} color={colors.onAccent} />}
         </View>
+      ) : onQuickAction ? (
+        <Pressable
+          onPress={onQuickAction}
+          onLongPress={onQuickActionLongPress}
+          delayLongPress={300}
+          hitSlop={6}
+          android_ripple={{ color: colors.borderStrong, borderless: true, radius: 22 }}
+          style={styles.quickAction}
+          accessibilityRole="button"
+          accessibilityLabel={
+            isFavorite
+              ? `Ajouter ${track.title} à une playlist`
+              : `Ajouter ${track.title} aux favoris`
+          }
+          accessibilityHint={isFavorite ? 'Appui long pour retirer des favoris' : undefined}
+        >
+          <Icon
+            name={isFavorite ? 'favorite' : 'add'}
+            filled={isFavorite}
+            size={22}
+            color={isFavorite ? colors.accent : colors.textMuted}
+          />
+        </Pressable>
       ) : isActive && !showNumber ? (
         <Icon name="graphic_eq" size={20} color={colors.accentIcon} />
-      ) : (
-        <Text style={styles.duration}>{formatDuration(track.durationMs)}</Text>
-      )}
+      ) : null}
     </Pressable>
   );
 });
@@ -138,6 +177,10 @@ type TrackIndexRowProps = {
   selectionMode?: boolean;
   selected?: boolean;
   onToggleSelect?: (track: LocalTrack) => void;
+  /** Bouton d'action rapide du slot de droite (cf. `TrackRowProps.onQuickAction`). */
+  onQuickAction?: (track: LocalTrack) => void;
+  onQuickActionLongPress?: (track: LocalTrack) => void;
+  isFavorite?: boolean;
 };
 
 /**
@@ -156,6 +199,9 @@ export const TrackIndexRow = memo(function TrackIndexRow({
   selectionMode = false,
   selected = false,
   onToggleSelect,
+  onQuickAction,
+  onQuickActionLongPress,
+  isFavorite = false,
 }: TrackIndexRowProps) {
   return (
     <TrackRow
@@ -167,6 +213,11 @@ export const TrackIndexRow = memo(function TrackIndexRow({
       subtitle={subtitle}
       selectionMode={selectionMode}
       selected={selected}
+      onQuickAction={onQuickAction ? () => onQuickAction(track) : undefined}
+      onQuickActionLongPress={
+        onQuickActionLongPress ? () => onQuickActionLongPress(track) : undefined
+      }
+      isFavorite={isFavorite}
     />
   );
 });
@@ -213,10 +264,12 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginTop: 2,
   },
-  duration: {
-    ...typography.body,
-    color: colors.textMuted,
-    fontVariant: ['tabular-nums'],
+  // 44×44 : même gabarit tactile que la pochette, donc `TRACK_ROW_HEIGHT` est inchangée.
+  quickAction: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   checkbox: {
     width: 24,

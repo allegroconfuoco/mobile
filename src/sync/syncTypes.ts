@@ -73,7 +73,7 @@ export type SyncResponse = {
   playlistTracks: SyncPlaylistTrackPull[];
 };
 
-// --- Synchro de l'historique d'écoute + handoff (issue #25), endpoint `/api/sync/plays` ---------
+// --- Synchro de l'historique d'écoute (issue #25), endpoint `/api/sync/plays` -------------------
 // Miroir exact du contrat backend (`backend/src/Service/PlaySyncService.php`).
 
 export type PlayEventPush = {
@@ -92,19 +92,10 @@ export type PlayEventPush = {
   deleted?: boolean;
 };
 
-export type PlaybackStatePush = {
-  trackId: string | null;
-  positionMs: number;
-  isPlaying: boolean;
-  deviceName?: string;
-};
-
 export type PlaySyncRequest = {
   since: string | null;
   tracks: SyncTrackPush[];
   events: PlayEventPush[];
-  /** État de lecture courant (handoff), omis si rien n'a joué depuis le lancement. */
-  playbackState?: PlaybackStatePush;
 };
 
 export type PlayEventPull = {
@@ -123,17 +114,8 @@ export type PlayEventPull = {
   updatedAt: string | null;
 };
 
-export type PlaybackStatePull = {
-  trackId: string | null;
-  positionMs: number;
-  isPlaying: boolean;
-  deviceName: string | null;
-  updatedAt: string | null;
-};
-
 export type PlaySyncResponse = {
   serverTime: string;
   events: PlayEventPull[];
   tracks: SyncTrackPull[];
-  playbackState: PlaybackStatePull | null;
 };

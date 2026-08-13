@@ -107,9 +107,17 @@ jobs:
 
       - name: Build release APK
         working-directory: android
+        # `-P` plutôt que `gradle.properties` : `android/` est gitignoré et régénéré par
+        # `expo prebuild` à chaque run, donc toute édition du fichier serait écrasée.
+        #  - reactNativeArchitectures : arm64-v8a seul. Le défaut Expo empile 4 ABIs dans un APK
+        #    universel, dont x86/x86_64 qui ne servent qu'aux émulateurs et armeabi-v7a, le 32 bits
+        #    des appareils d'avant ~2016 — soit trois copies inutiles de ~50 Mo de bibliothèques.
+        #  - expo.gif.enabled : retire fresco animated-gif (~0,6 Mo/ABI), l'appli n'affiche aucun GIF.
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew assembleRelease --no-daemon \
+            -PreactNativeArchitectures=arm64-v8a \
+            -Pexpo.gif.enabled=false
 
       - name: Prépare l'APK
         # Nom d'asset FIXE (pas de suffixe de version) : le backend expose downloadUrl =

@@ -1,11 +1,15 @@
-import {
-  SchibstedGrotesk_400Regular,
-  SchibstedGrotesk_500Medium,
-  SchibstedGrotesk_600SemiBold,
-  SchibstedGrotesk_700Bold,
-  SchibstedGrotesk_800ExtraBold,
-} from '@expo-google-fonts/schibsted-grotesk';
-import { MaterialSymbols_400Regular } from '@expo-google-fonts/material-symbols';
+// Imports **profonds** (le fichier .ttf, pas le baril du paquet) : `@expo-google-fonts/*`
+// expose un index qui fait `require()` de TOUTES ses variantes, donc importer quatre poids depuis
+// le baril embarquait les douze (les huit italiques comprises) — ~800 Ko d'APK pour rien, Metro
+// n'ayant aucun moyen de savoir lesquelles servent.
+import SchibstedGrotesk_500Medium from '@expo-google-fonts/schibsted-grotesk/500Medium/SchibstedGrotesk_500Medium.ttf';
+import SchibstedGrotesk_600SemiBold from '@expo-google-fonts/schibsted-grotesk/600SemiBold/SchibstedGrotesk_600SemiBold.ttf';
+import SchibstedGrotesk_700Bold from '@expo-google-fonts/schibsted-grotesk/700Bold/SchibstedGrotesk_700Bold.ttf';
+import SchibstedGrotesk_800ExtraBold from '@expo-google-fonts/schibsted-grotesk/800ExtraBold/SchibstedGrotesk_800ExtraBold.ttf';
+// Material Symbols **sous-ensemblée** aux ~68 ligatures de `IconName` (12 Ko au lieu des 956 Ko
+// de la police complète du paquet npm, qui embarque 4000 icônes dont on en utilise 68).
+// Régénération : cf. l'entrée « taille de l'APK » du journal ci-dessous.
+import MaterialSymbolsSubset from '../../assets/fonts/MaterialSymbolsOutlined_Subset.ttf';
 // Instance FILL=1 (cœur plein) des Material Symbols Outlined, cf. theme.fontFamily.iconsFilled.
 // La police par défaut est FILL=0 (contour) : sans elle, un cœur liké ne peut pas être plein.
 import MaterialSymbolsFilled from '../../assets/fonts/MaterialSymbolsOutlined_Filled.ttf';
@@ -32,22 +36,21 @@ import { UpdateModal } from '@/update/UpdateModal';
 // Garde le splash affiché tant que les polices ET la session ne sont pas prêtes.
 SplashScreen.preventAutoHideAsync();
 
-// Ancre de la pile pour les deep links : au lancement à froid sur un écran ciblé, `(tabs)` est
+// Ancre de la pile pour les deep links : au lancement à froid sur un écran ciblé, `(app)` est
 // monté SOUS lui, sinon cet écran serait seul dans la pile et « retour » sortirait de l'app.
 // (La notification média v5 ouvre l'app par un simple launch intent, sans deep link.)
 export const unstable_settings = {
-  initialRouteName: '(tabs)',
+  initialRouteName: '(app)',
 };
 
 export default function RootLayout() {
   const [loaded, error] = useFonts({
-    SchibstedGrotesk_400Regular,
     SchibstedGrotesk_500Medium,
     SchibstedGrotesk_600SemiBold,
     SchibstedGrotesk_700Bold,
     SchibstedGrotesk_800ExtraBold,
-    MaterialSymbols_400Regular,
-    // Clé = nom de famille référencé par theme.fontFamily.iconsFilled.
+    // Clés = noms de famille référencés par theme.fontFamily.icons / .iconsFilled.
+    MaterialSymbols_400Regular: MaterialSymbolsSubset,
     MaterialSymbolsFilled,
   });
 
@@ -82,7 +85,7 @@ export default function RootLayout() {
  * pile) qu'une fois les polices chargées ET la session restaurée depuis le stockage sécurisé —
  * sinon on flasherait l'écran login avant de savoir qu'on est déjà connecté.
  *
- * `Stack.Protected` (expo-router) redirige automatiquement : connecté → `(tabs)`, sinon → `login`.
+ * `Stack.Protected` (expo-router) redirige automatiquement : connecté → `(app)`, sinon → `login`.
  */
 function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
   const { status, isAuthenticated } = useAuth();
@@ -116,12 +119,12 @@ function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
           contentStyle: { backgroundColor: colors.background },
         }}
       >
-        {/* Écrans accessibles une fois connecté. Les écrans de détail (artiste, album, playlist,
-            favoris, réglages…) vivent désormais DANS les stacks d'onglet (cf. (tabs)/(library) et
-            (tabs)/(settings)) pour garder la tab bar + le mini-player visibles. Seuls restent au
-            niveau racine les modaux, qui doivent couvrir toute l'UI, barre comprise. */}
+        {/* Écrans accessibles une fois connecté. Toutes les listes et les écrans de détail (artiste,
+            album, playlist, favoris, réglages…) vivent dans le Stack unique de `(app)`, sous le
+            mini-player persistant + le menu latéral. Seuls restent au niveau racine les modaux, qui
+            doivent couvrir toute l'UI, chrome bas compris. */}
         <Stack.Protected guard={isAuthenticated}>
-          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="(app)" />
           {/* Écran Lecture présenté en modal, au-dessus de la tab bar. */}
           <Stack.Screen name="now-playing" options={{ presentation: 'modal' }} />
           {/* File d'attente, également en modal. */}

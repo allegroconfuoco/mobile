@@ -1,7 +1,8 @@
 /**
- * Hauteur mesurée du « chrome » bas de l'app (mini-player + tab bar + inset système), rapportée
- * par `ForgeTabBar` via `onLayout`. Sert au toast (posé juste au-dessus) : mesurer vaut mieux
- * que des constantes de hauteur, la barre variant avec l'inset et la présence du mini-player.
+ * Hauteur mesurée du « chrome » bas de l'app (mini-player + inset système), rapportée par le
+ * conteneur du mini-player dans `(app)/_layout.tsx` via `onLayout`. Sert au toast (posé juste
+ * au-dessus) : mesurer vaut mieux que des constantes de hauteur, le chrome variant avec l'inset
+ * et la présence du mini-player.
  */
 
 type Listener = (height: number) => void;

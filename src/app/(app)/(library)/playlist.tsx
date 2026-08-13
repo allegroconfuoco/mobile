@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
 import { useRouter } from '@/lib/useRouter';
@@ -11,8 +11,11 @@ import { showToast } from '@/components/Toast';
 import { tapMedium } from '@/lib/haptics';
 import { DraggableTrackList, type DraggableTrackItem } from '@/components/DraggableTrackList';
 import { PlaylistNameDialog } from '@/components/PlaylistNameDialog';
+import { PlaylistPickerSheet } from '@/components/PlaylistPickerSheet';
 import { QuickActionsSheet } from '@/components/QuickActionsSheet';
+import { TrackIndexRow, trackRowLayout } from '@/components/TrackRow';
 import { useTrackActionsMenu } from '@/components/useTrackActionsMenu';
+import { useTrackSelection } from '@/components/useTrackSelection';
 import { UNKNOWN_ARTIST } from '@/library/grouping';
 import { useLibrary } from '@/library/LibraryProvider';
 import { usePlaylistsContext } from '@/library/PlaylistsProvider';
@@ -55,10 +58,10 @@ export default function PlaylistScreen() {
   } = usePlaylistsContext();
   const { playQueue } = usePlayer();
   const activeTrack = useActiveTrack();
-  const trackMenu = useTrackActionsMenu();
 
   const [renaming, setRenaming] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [pickerTracks, setPickerTracks] = useState<LocalTrack[] | null>(null);
 
   const playlist = playlists.find((p) => p.id === id);
   const name = playlist?.name ?? 'Playlist';
@@ -79,6 +82,12 @@ export default function PlaylistScreen() {
     () => entries.map((e) => e.localTrack).filter((t): t is LocalTrack => t !== null),
     [entries]
   );
+
+  // Mode sélection multiple mutualisé : porte sur les pistes jouables (une entrée synchronisée sans
+  // fichier local n'est pas sélectionnable — aucune des actions ne s'y applique). En mode sélection,
+  // le rendu bascule de la liste réordonnable vers une liste simple à cocher (deux modes exclusifs).
+  const selection = useTrackSelection(playableTracks, { onAddToPlaylist: setPickerTracks });
+  const trackMenu = useTrackActionsMenu({ onSelect: selection.start });
 
   const items = useMemo<DraggableTrackItem[]>(
     () =>
@@ -178,6 +187,8 @@ export default function PlaylistScreen() {
         )}
       </View>
 
+      {selection.header}
+
       {count === 0 ? (
         <View style={styles.centered}>
           <Icon name="queue_music" size={40} color={colors.textMuted} />
@@ -192,6 +203,30 @@ export default function PlaylistScreen() {
             <Text style={styles.emptyAddLabel}>Ajouter des titres</Text>
           </Pressable>
         </View>
+      ) : selection.active ? (
+        // Mode sélection : liste simple à cocher sur les seules pistes jouables (le réordonnancement
+        // est suspendu, les deux gestes — drag et coche — ne peuvent pas coexister proprement).
+        <FlatList
+          data={playableTracks}
+          keyExtractor={(track) => track.id}
+          getItemLayout={trackRowLayout}
+          windowSize={7}
+          initialNumToRender={12}
+          maxToRenderPerBatch={16}
+          renderItem={({ item, index }) => (
+            <TrackIndexRow
+              track={item}
+              index={index}
+              isActive={item.id === activeTrack?.mediaId}
+              onPlay={() => void playQueue(playableTracks, index, `playlist:${id}`)}
+              selectionMode
+              selected={selection.isSelected(item.id)}
+              onToggleSelect={selection.toggle}
+            />
+          )}
+          contentContainerStyle={{ paddingBottom: insets.bottom + spacing.xxl }}
+          showsVerticalScrollIndicator={false}
+        />
       ) : (
         <DraggableTrackList
           items={items}
@@ -217,6 +252,8 @@ export default function PlaylistScreen() {
           contentPaddingBottom={insets.bottom + spacing.xxl}
         />
       )}
+
+      {selection.footer}
 
       <PlaylistNameDialog
         visible={renaming}
@@ -248,6 +285,12 @@ export default function PlaylistScreen() {
       />
 
       {trackMenu.element}
+
+      <PlaylistPickerSheet
+        tracks={pickerTracks}
+        onClose={() => setPickerTracks(null)}
+        onAdded={selection.cancel}
+      />
     </View>
   );
 }

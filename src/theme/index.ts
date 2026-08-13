@@ -25,6 +25,9 @@ export const colors = {
   /** Texte posé sur l'accent (boutons pleins). */
   onAccent: '#1A0D07',
 
+  /** Accent « danger » (action destructive : suppression physique d'un fichier). */
+  danger: '#E5544B',
+
   /** Texte principal. */
   textPrimary: '#FAF4EE',
   /** Texte secondaire. */
@@ -91,7 +94,7 @@ export const radii = {
  * @expo-google-fonts/* et aux clés passées à `useFonts` (voir src/app/_layout.tsx).
  */
 export const fontFamily = {
-  regular: 'SchibstedGrotesk_400Regular',
+  // Pas de 400 : aucun style ne l'utilise, et chaque poids embarqué pèse ~100 Ko dans l'APK.
   medium: 'SchibstedGrotesk_500Medium',
   semibold: 'SchibstedGrotesk_600SemiBold',
   bold: 'SchibstedGrotesk_700Bold',

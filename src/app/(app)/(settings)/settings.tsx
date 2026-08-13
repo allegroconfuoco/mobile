@@ -6,12 +6,14 @@ import { useRouter } from '@/lib/useRouter';
 
 import { colors, radii, spacing, typography } from '@/theme';
 import { Icon, type IconName } from '@/components/Icon';
+import { MenuButton } from '@/components/MenuButton';
 import { showToast } from '@/components/Toast';
 import { tapLight, tapMedium } from '@/lib/haptics';
 import { useAuth } from '@/auth/AuthProvider';
 import { useLibrary } from '@/library/LibraryProvider';
 import { coverCacheSize } from '@/library/trackTags';
 import { isIncognitoEnabled, setIncognitoEnabled } from '@/player/playRecorder';
+import { clearResumePoint } from '@/player/resumeState';
 import { useSync } from '@/sync/SyncProvider';
 
 type Row = { icon: IconName; label: string; hint: string; href?: Href };
@@ -143,6 +145,9 @@ export default function SettingsScreen() {
         style: 'destructive',
         onPress: () => {
           tapMedium();
+          // La carte « Reprendre » proposerait sinon l'écoute du compte précédent à la connexion
+          // suivante (la base est partagée entre comptes sur l'appareil).
+          clearResumePoint();
           void signOut();
         },
       },
@@ -155,6 +160,9 @@ export default function SettingsScreen() {
         contentContainerStyle={{ paddingTop: insets.top + spacing.md }}
         showsVerticalScrollIndicator={false}
       >
+        <View style={{ paddingLeft: spacing.xxl, paddingTop: spacing.xs }}>
+          <MenuButton />
+        </View>
         <Text style={styles.title}>Réglages</Text>
 
         <View style={styles.list}>

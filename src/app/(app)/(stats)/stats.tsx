@@ -16,6 +16,7 @@ import * as Sharing from 'expo-sharing';
 
 import { colors, radii, spacing, typography } from '@/theme';
 import { Icon } from '@/components/Icon';
+import { MenuButton } from '@/components/MenuButton';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { showToast } from '@/components/Toast';
 import { TrackCover } from '@/components/TrackCover';
@@ -196,6 +197,9 @@ export default function StatsScreen() {
         contentContainerStyle={{ paddingTop: insets.top + spacing.md, paddingBottom: spacing.xxl }}
         showsVerticalScrollIndicator={false}
       >
+        <View style={{ paddingLeft: spacing.xxl, paddingTop: spacing.xs }}>
+          <MenuButton />
+        </View>
         <Text style={styles.title}>Écoutes</Text>
 
         <SegmentedControl segments={PERIODS} value={period} onChange={changePeriod} />

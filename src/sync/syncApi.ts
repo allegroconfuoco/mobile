@@ -48,7 +48,7 @@ export async function postPlaylistSync(token: string, request: SyncRequest): Pro
   return (await postSync(token, '/api/sync/playlists', request)) as SyncResponse;
 }
 
-/** POST /api/sync/plays (historique d'écoute + handoff, issue #25) avec le Bearer JWT. */
+/** POST /api/sync/plays (historique d'écoute, issue #25) avec le Bearer JWT. */
 export async function postPlaySync(
   token: string,
   request: PlaySyncRequest

@@ -433,7 +433,7 @@ export function sortTracks(tracks: LocalTrack[], sort: TrackSort): LocalTrack[] 
     copy.sort((a, b) => compare(artistOf(a), artistOf(b)) || compare(a.title, b.title));
   } else if (sort === 'recent') {
     // Date d'ajout manquante = relégué en fin, départagé par titre pour un ordre stable.
-    copy.sort((a, b) => (b.creationTime ?? 0) - (a.creationTime ?? 0) || compare(a.title, b.title));
+    copy.sort((a, b) => (b.addedAt ?? 0) - (a.addedAt ?? 0) || compare(a.title, b.title));
   } else {
     copy.sort((a, b) => compare(a.title, b.title));
   }

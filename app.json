@@ -2,7 +2,7 @@
   "expo": {
     "name": "Fuoco",
     "slug": "fuoco",
-    "version": "1.0.0",
+    "version": "2.3.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "fuoco",
@@ -13,8 +13,9 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#141110",
-        "foregroundImage": "./assets/images/adaptive-foreground.png"
+        "backgroundColor": "#FEF8EE",
+        "foregroundImage": "./assets/images/adaptive-foreground.png",
+        "monochromeImage": "./assets/images/adaptive-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.callmetrinity.fuoco",
@@ -55,7 +56,18 @@
       ],
       "expo-sqlite",
       "expo-secure-store",
-      "expo-sharing"
+      "expo-sharing",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableMinifyInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true,
+            "useLegacyPackaging": true,
+            "extraProguardRules": "-keep class com.doublesymmetry.** { *; }\n-keep class androidx.media3.** { *; }"
+          }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

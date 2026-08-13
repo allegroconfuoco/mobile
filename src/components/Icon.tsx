@@ -13,6 +13,8 @@ import { colors, fontFamily } from '@/theme';
  */
 export type IconName =
   | 'home'
+  | 'dashboard'
+  | 'menu'
   | 'search'
   | 'library_music'
   | 'settings'

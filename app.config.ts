@@ -27,9 +27,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     package: IS_DEV ? `${config.android?.package}.dev` : config.android?.package,
     adaptiveIcon: {
       ...config.android?.adaptiveIcon,
-      // Fond d'icône rougeoyant en dev (vs charbon en prod) : distingue les deux tuiles
-      // sans avoir à générer un second jeu d'assets.
-      backgroundColor: IS_DEV ? '#3A1114' : config.android?.adaptiveIcon?.backgroundColor,
+      // Fond d'icône rosé en dev (vs le crème du médaillon en prod) : distingue les deux tuiles
+      // sans avoir à générer un second jeu d'assets. Reste clair, pour que le disque du logo
+      // continue de se fondre dans son fond au lieu de flotter sur une tuile contrastée.
+      backgroundColor: IS_DEV ? '#F7DCD8' : config.android?.adaptiveIcon?.backgroundColor,
     },
   },
 });
