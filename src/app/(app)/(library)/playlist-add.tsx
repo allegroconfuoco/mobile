@@ -185,7 +185,7 @@ export default function PlaylistAddScreen() {
                     </View>
                   )}
                   <TrackCover
-                    uri={item.artworkUri ?? item.coverArtUrl}
+                    uri={item.artworkUri}
                     size={40}
                     seed={`${item.title}${item.artist ?? ''}`}
                   />
@@ -203,7 +203,7 @@ export default function PlaylistAddScreen() {
           />
         )}
 
-        <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
+        <View style={[styles.footer, { paddingBottom: spacing.md }]}>
           <Pressable
             onPress={add}
             disabled={selected.size === 0}

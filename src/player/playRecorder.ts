@@ -9,26 +9,15 @@ import { createPlayRecorder, type PlayContext } from './playSession';
  * runtime JS, donc ce store est visible des deux côtés.
  *
  * La logique de session vit dans `playSession.ts` (cœur pur, testé au harnais) ; ici on ne fait
- * que câbler les effets réels : horloge, UUIDv7, préférence incognito et écriture en base avec
- * résolution de l'identité **partagée** de la piste (`track_registry`).
+ * que câbler les effets réels : horloge, UUIDv7 et écriture en base avec résolution de l'identité
+ * **partagée** de la piste (`track_registry`).
  */
 
 export type { PlayContext };
 
-/** Vrai si le mode « écoute privée » est actif (préférence `app_settings`). */
-export function isIncognitoEnabled(): boolean {
-  return db.getSetting('history.incognito') === '1';
-}
-
-/** Active/désactive l'écoute privée. Lu à chaque flush : effet immédiat, même session en cours. */
-export function setIncognitoEnabled(enabled: boolean): void {
-  db.setSetting('history.incognito', enabled ? '1' : '0');
-}
-
 const recorder = createPlayRecorder({
   now: Date.now,
   newId: uuidv7,
-  isIncognito: isIncognitoEnabled,
   persist(draft) {
     // Résolution de l'identité stable au moment de l'écriture : le registre adopte ou crée
     // l'id partagé de la piste (même clé que la synchro des playlists).

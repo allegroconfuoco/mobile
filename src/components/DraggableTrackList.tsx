@@ -478,7 +478,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    paddingHorizontal: spacing.lg,
+    // Même retrait à gauche que les autres listes de pistes : la pochette s'aligne sur le titre
+    // de l'écran.
+    paddingLeft: spacing.xxl,
+    paddingRight: spacing.lg,
   },
   rowRaised: {
     backgroundColor: colors.surface,

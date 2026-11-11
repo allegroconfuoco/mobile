@@ -1,9 +1,9 @@
 /**
- * Contexte des favoris (finition Phase 1) : morceaux « likés », local-only.
+ * Contexte des favoris : morceaux « likés », local-only.
  *
- * Même motif que `PlaylistsProvider` : une seule instance partagée par toute l'app (le coeur du
- * Now Playing, l'action du menu long-press et la vue Favoris de la bibliothèque doivent refléter
- * le même état). SQLite reste la source de vérité ; on garde ici un `Set` d'ids media-store en
+ * Même motif que `PlaylistsProvider` : une seule instance partagée par toute l'app (le cœur du
+ * lecteur, la ligne « Favoris » du sélecteur de playlists et l'écran Favoris doivent refléter le
+ * même état). SQLite reste la source de vérité ; on garde ici un `Set` d'ids media-store en
  * mémoire, initialisé synchroniquement depuis la base et muté à chaque toggle.
  */
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
@@ -19,17 +19,14 @@ export type UseFavorites = {
   favoriteIds: Set<string>;
   /** La piste est-elle likée ? */
   isFavorite: (trackId: string) => boolean;
+  /** Bascule l'état favori d'une piste et renvoie le **nouvel** état (`true` = likée). */
+  toggleFavorite: (trackId: string) => boolean;
   /**
-   * Bascule l'état favori d'une piste et renvoie le **nouvel** état (`true` = likée).
-   * `mbid` est stocké en réserve pour une future synchro (inerte en Phase 1).
-   */
-  toggleFavorite: (trackId: string, mbid?: string | null) => boolean;
-  /**
-   * Ajoute un lot de pistes aux favoris (action groupée du mode sélection). Sens « liker »
+   * Ajoute un lot de pistes aux favoris (sélecteur de playlists en multi-sélection). Sens « liker »
    * uniquement : les pistes déjà likées sont laissées telles quelles (pas un toggle). Renvoie le
    * nombre de pistes réellement ajoutées.
    */
-  addFavorites: (entries: { id: string; mbid?: string | null }[]) => number;
+  addFavorites: (trackIds: string[]) => number;
 };
 
 const FavoritesContext = createContext<UseFavorites | null>(null);
@@ -39,8 +36,8 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
 
   const isFavorite = useCallback((trackId: string) => favoriteIds.has(trackId), [favoriteIds]);
 
-  const toggleFavorite = useCallback((trackId: string, mbid: string | null = null) => {
-    const nowLiked = db.toggleFavorite(trackId, mbid, Date.now());
+  const toggleFavorite = useCallback((trackId: string) => {
+    const nowLiked = db.toggleFavorite(trackId, Date.now());
     setFavoriteIds((prev) => {
       if (!nowLiked) {
         const next = new Set(prev);
@@ -54,11 +51,8 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
     return nowLiked;
   }, []);
 
-  const addFavorites = useCallback((entries: { id: string; mbid?: string | null }[]) => {
-    const added = db.addFavorites(
-      entries.map((e) => ({ trackId: e.id, mbid: e.mbid ?? null })),
-      Date.now()
-    );
+  const addFavorites = useCallback((trackIds: string[]) => {
+    const added = db.addFavorites(trackIds, Date.now());
     if (added.length > 0) {
       // Même règle que le toggle : le lot vient d'être liké, il passe donc en tête.
       setFavoriteIds((prev) => new Set([...added, ...prev]));

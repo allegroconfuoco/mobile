@@ -1,13 +1,16 @@
 /**
  * Regroupement de la bibliothèque par artiste / album (issues #12 et #13) — logique pure.
  *
- * Toutes les métadonnées (artiste, album, album artist, n° de piste, pochette) sont désormais
- * persistées sur chaque `LocalTrack` au scan (cf. `useAudioLibrary`), donc ces fonctions
- * travaillent en mémoire sur la liste déjà filtrée par les préférences d'inclusion. Elles sont
- * partagées entre l'onglet Bibliothèque et les écrans détail (`app/artist.tsx`, `app/album.tsx`)
- * pour que le regroupement et le filtrage restent strictement cohérents.
+ * Toutes les métadonnées (artiste, album, album artist, n° de piste, pochette) sont persistées sur
+ * chaque `LocalTrack` au scan (cf. `useAudioLibrary`), donc ces fonctions travaillent en mémoire
+ * sur la liste déjà filtrée par les préférences d'inclusion. Elles sont partagées entre les onglets
+ * et les écrans détail pour que le regroupement et le filtrage restent strictement cohérents.
+ *
+ * **Coût** : tout ce qui compare ou cherche du texte passe par des clés « pliées » (minuscule, sans
+ * accent) calculées une fois par chaîne puis mémorisées. Un tri par `localeCompare` coûte un appel
+ * ICU par comparaison — plusieurs dizaines de millisecondes au démarrage sur quelques milliers de
+ * titres — alors que comparer deux clés déjà pliées est une simple comparaison de chaînes.
  */
-import type { ReleaseTrackRef } from './db';
 import type { LocalTrack } from './useAudioLibrary';
 
 export const UNKNOWN_ARTIST = 'Artiste inconnu';
@@ -16,9 +19,28 @@ export const UNKNOWN_ALBUM = 'Album inconnu';
 /** Séparateur interne des clés composées (album artist + album), jamais affiché (unit separator). */
 const SEP = '\u0000';
 
-/** Comparaison texte insensible à la casse et aux accents, ordre français. */
+/**
+ * Clés pliées mémorisées. Les mêmes chaînes (noms d'artistes, d'albums, titres) reviennent à chaque
+ * tri et à chaque frappe de recherche : on ne les plie qu'une fois. La taille est bornée par celle
+ * de la bibliothèque ; les requêtes de recherche, elles, ne passent pas par ce cache.
+ */
+const foldCache = new Map<string, string>();
+
+/** `normalizeForSearch` mémorisé, pour les chaînes issues de la bibliothèque. */
+export function foldKey(value: string): string {
+  let key = foldCache.get(value);
+  if (key === undefined) {
+    key = normalizeForSearch(value);
+    foldCache.set(value, key);
+  }
+  return key;
+}
+
+/** Comparaison texte insensible à la casse et aux accents, sur clés pliées. */
 function compare(a: string, b: string): number {
-  return a.localeCompare(b, 'fr', { sensitivity: 'base' });
+  const ka = foldKey(a);
+  const kb = foldKey(b);
+  return ka < kb ? -1 : ka > kb ? 1 : 0;
 }
 
 /** Artiste interprète (TPE1) affiché, avec repli. */
@@ -32,8 +54,7 @@ export function artistOf(track: LocalTrack): string {
  * Deux formes : la parenthèse/crochet « (feat. X) », et la queue « feat. X … » jusqu'à la fin.
  * **Volontairement conservateur** : on ne coupe QUE sur `feat/ft/featuring` (le motif dominant des
  * fichiers téléchargés), jamais sur `,` / `&` / `/` — sinon on casserait des noms de groupe légitimes
- * (« Earth, Wind & Fire », « Simon & Garfunkel », « AC/DC »). Les vrais multi-artistes séparés par
- * une virgule se nettoient à la main via l'écran de suppression d'artiste (override réversible).
+ * (« Earth, Wind & Fire », « Simon & Garfunkel », « AC/DC »).
  */
 const FEATURING =
   /\s*[([]\s*(?:feat|ft|featuring)\.?\s+[^)\]]*[)\]]|\s+(?:feat|ft|featuring)\.?\s+.*$/gi;
@@ -47,8 +68,8 @@ export function stripFeaturing(name: string): string {
 /**
  * Artiste de l'album (regroupement). Le tag TPE2 prime, sinon repli sur l'interprète (TPE1). Dans
  * les deux cas on **retire le featuring** : ainsi « A » et « A feat. B » (même album, seul un titre
- * a un guest) retombent sur le même artiste d'album et **ne scindent plus l'album**, y compris quand
- * MusicBrainz ignore le featuring. L'interprète brut par piste reste affiché via `artistOf`.
+ * a un guest) retombent sur le même artiste d'album et **ne scindent plus l'album**. L'interprète
+ * brut par piste reste affiché via `artistOf`.
  */
 export function albumArtistOf(track: LocalTrack): string {
   const raw = track.albumArtist?.trim() || track.artist?.trim();
@@ -93,40 +114,6 @@ export type AlbumGroup = {
   artworkUri: string | null;
 };
 
-/**
- * Regroupe les pistes par artiste interprète **brut** (champ exact), triées par nom.
- * ⚠️ La vue Artistes n'utilise plus cette fonction : voir `buildMergedArtists` (artists.ts), qui
- * rattache les pistes multi-artistes (« A & B ») aux artistes connus en solo.
- */
-export function buildArtists(tracks: LocalTrack[]): ArtistGroup[] {
-  const map = new Map<
-    string,
-    { trackCount: number; albums: Set<string>; artworkUri: string | null }
-  >();
-  for (const t of tracks) {
-    const name = artistOf(t);
-    let group = map.get(name);
-    if (!group) {
-      group = { trackCount: 0, albums: new Set(), artworkUri: null };
-      map.set(name, group);
-    }
-    group.trackCount += 1;
-    group.albums.add(albumKeyOf(t));
-    if (!group.artworkUri) {
-      // Pochette locale (tag) en priorité, sinon celle récupérée par l'enrichissement (issue #19).
-      group.artworkUri = t.artworkUri ?? t.coverArtUrl;
-    }
-  }
-  return [...map.entries()]
-    .map(([name, g]) => ({
-      name,
-      trackCount: g.trackCount,
-      albumCount: g.albums.size,
-      artworkUri: g.artworkUri,
-    }))
-    .sort((a, b) => compare(a.name, b.name));
-}
-
 /** Regroupe les pistes par album, triées par artiste puis titre. */
 export function buildAlbums(tracks: LocalTrack[]): AlbumGroup[] {
   const map = new Map<
@@ -142,21 +129,12 @@ export function buildAlbums(tracks: LocalTrack[]): AlbumGroup[] {
     }
     group.trackCount += 1;
     if (!group.artworkUri) {
-      // Pochette locale (tag) en priorité, sinon celle récupérée par l'enrichissement (issue #19).
-      group.artworkUri = t.artworkUri ?? t.coverArtUrl;
+      group.artworkUri = t.artworkUri;
     }
   }
   return [...map.entries()]
     .map(([key, g]) => ({ key, ...g }))
     .sort((a, b) => compare(a.artist, b.artist) || compare(a.title, b.title));
-}
-
-/**
- * Pistes d'un artiste donné (nom **exact** renvoyé par `buildArtists`).
- * ⚠️ Les écrans alignés sur la vue Artistes utilisent `tracksForMergedArtist` (artists.ts).
- */
-export function tracksForArtist(tracks: LocalTrack[], name: string): LocalTrack[] {
-  return tracks.filter((t) => artistOf(t) === name);
 }
 
 /** Position d'ordre, valeur manquante repoussée en fin. */
@@ -203,105 +181,6 @@ export function groupAlbumByDisc(albumTracks: LocalTrack[]): AlbumDisc[] {
       last.data.push(t);
     } else {
       discs.push({ disc: t.discNo ?? null, data: [t] });
-    }
-  }
-  return discs;
-}
-
-// --- Titres fantômes (albums partiels identifiés) --------------------------------------------
-
-/**
- * Une ligne du détail d'un album : soit un fichier local (`local`), soit une piste **manquante**
- * (`ghost`) connue par la tracklist de la release identifiée mais absente localement.
- */
-export type AlbumRow =
-  | { kind: 'local'; track: LocalTrack }
-  | { kind: 'ghost'; disc: number; position: number; title: string };
-
-/** Un disque de l'affichage détail, mêlant fichiers locaux et titres fantômes. */
-export type AlbumRowDisc = {
-  disc: number | null;
-  data: AlbumRow[];
-};
-
-/** Disque d'une ligne : `discNo` du fichier local (repli `null`), ou disque de la piste release. */
-function discOfRow(row: AlbumRow): number | null {
-  return row.kind === 'local' ? (row.track.discNo ?? null) : row.disc;
-}
-
-/**
- * Trouve le fichier local correspondant à une piste de release, sans réutiliser un fichier déjà
- * apparié (`used`). D'abord par recording MBID (le plus fiable, posé par l'identification #23),
- * sinon par (disque, position) — l'identification aligne `discNo`/`trackNo` des locaux sur la
- * release, donc ce repli est fiable même sans MBID.
- */
-function findLocalForEntry(
-  albumTracks: LocalTrack[],
-  entry: ReleaseTrackRef,
-  used: Set<string>
-): LocalTrack | null {
-  if (entry.recordingMbid) {
-    const byMbid = albumTracks.find(
-      (t) => !used.has(t.id) && t.mbid != null && t.mbid === entry.recordingMbid
-    );
-    if (byMbid) {
-      return byMbid;
-    }
-  }
-  return (
-    albumTracks.find(
-      (t) => !used.has(t.id) && (t.discNo ?? 1) === entry.discNo && t.trackNo === entry.position
-    ) ?? null
-  );
-}
-
-/**
- * Fusionne les fichiers locaux d'un album avec la tracklist complète de sa release identifiée
- * (issue #23) : chaque piste de la release devient une ligne `local` (fichier possédé) ou `ghost`
- * (titre manquant), dans l'ordre de la release. Les fichiers locaux non appariés (bonus, ou hors
- * release) sont ajoutés en fin. Tracklist vide (album non identifié, ou identifié avant cette
- * feature) → aucun fantôme, on garde le comportement historique (locaux triés).
- */
-export function mergeAlbumWithTracklist(
-  albumTracks: LocalTrack[],
-  tracklist: ReleaseTrackRef[]
-): AlbumRow[] {
-  if (tracklist.length === 0) {
-    return [...albumTracks].sort(byDiscThenTrack).map((track) => ({ kind: 'local', track }));
-  }
-  const used = new Set<string>();
-  const rows: AlbumRow[] = [];
-  for (const entry of tracklist) {
-    const local = findLocalForEntry(albumTracks, entry, used);
-    if (local) {
-      used.add(local.id);
-      rows.push({ kind: 'local', track: local });
-    } else {
-      rows.push({
-        kind: 'ghost',
-        disc: entry.discNo,
-        position: entry.position,
-        title: entry.title ?? '',
-      });
-    }
-  }
-  const leftover = albumTracks.filter((t) => !used.has(t.id)).sort(byDiscThenTrack);
-  for (const track of leftover) {
-    rows.push({ kind: 'local', track });
-  }
-  return rows;
-}
-
-/** Découpe les lignes fusionnées (`mergeAlbumWithTracklist`) en disques consécutifs. */
-export function groupAlbumRowsByDisc(rows: AlbumRow[]): AlbumRowDisc[] {
-  const discs: AlbumRowDisc[] = [];
-  for (const row of rows) {
-    const disc = discOfRow(row);
-    const last = discs[discs.length - 1];
-    if (last && last.disc === disc) {
-      last.data.push(row);
-    } else {
-      discs.push({ disc, data: [row] });
     }
   }
   return discs;
@@ -384,13 +263,20 @@ export function normalizeForSearch(value: string): string {
   return out.trim();
 }
 
-/** Une piste correspond si le terme est présent dans son titre, artiste ou album. */
-function matchesTrack(track: LocalTrack, needle: string): boolean {
-  return (
-    normalizeForSearch(track.title).includes(needle) ||
-    normalizeForSearch(artistOf(track)).includes(needle) ||
-    normalizeForSearch(albumOf(track)).includes(needle)
-  );
+/**
+ * Clé de recherche d'une piste (titre + artiste + album pliés), calculée une fois par objet piste.
+ * Une `WeakMap` : les pistes sont recréées à chaque relecture de la base, les anciennes clés
+ * partent avec elles.
+ */
+const trackSearchKeys = new WeakMap<LocalTrack, string>();
+
+function trackSearchKey(track: LocalTrack): string {
+  let key = trackSearchKeys.get(track);
+  if (key === undefined) {
+    key = `${foldKey(track.title)}\n${foldKey(artistOf(track))}\n${foldKey(albumOf(track))}`;
+    trackSearchKeys.set(track, key);
+  }
+  return key;
 }
 
 /** Filtre les pistes sur titre / artiste / album. Requête vide = liste inchangée. */
@@ -399,7 +285,7 @@ export function filterTracks(tracks: LocalTrack[], query: string): LocalTrack[] 
   if (!needle) {
     return tracks;
   }
-  return tracks.filter((t) => matchesTrack(t, needle));
+  return tracks.filter((t) => trackSearchKey(t).includes(needle));
 }
 
 /** Filtre les artistes agrégés sur leur nom. Requête vide = liste inchangée. */
@@ -408,7 +294,7 @@ export function filterArtists(artists: ArtistGroup[], query: string): ArtistGrou
   if (!needle) {
     return artists;
   }
-  return artists.filter((a) => normalizeForSearch(a.name).includes(needle));
+  return artists.filter((a) => foldKey(a.name).includes(needle));
 }
 
 /** Filtre les albums agrégés sur leur titre ou leur artiste. Requête vide = liste inchangée. */
@@ -418,8 +304,7 @@ export function filterAlbums(albums: AlbumGroup[], query: string): AlbumGroup[] 
     return albums;
   }
   return albums.filter(
-    (a) =>
-      normalizeForSearch(a.title).includes(needle) || normalizeForSearch(a.artist).includes(needle)
+    (a) => foldKey(a.title).includes(needle) || foldKey(a.artist).includes(needle)
   );
 }
 

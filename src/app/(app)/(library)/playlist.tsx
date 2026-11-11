@@ -1,27 +1,28 @@
-import { useMemo, useState } from 'react';
-import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useCallback, useMemo, useState } from 'react';
+import { Alert, FlatList, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
-import { useRouter } from '@/lib/useRouter';
 
 import { colors, radii, spacing, typography } from '@/theme';
-import { BackButton } from '@/components/BackButton';
-import { Icon } from '@/components/Icon';
-import { showToast } from '@/components/Toast';
-import { tapMedium } from '@/lib/haptics';
+import { DetailHero, DetailTopBar, TopBarButton } from '@/components/DetailScreen';
 import { DraggableTrackList, type DraggableTrackItem } from '@/components/DraggableTrackList';
+import { Icon } from '@/components/Icon';
 import { PlaylistNameDialog } from '@/components/PlaylistNameDialog';
-import { PlaylistPickerSheet } from '@/components/PlaylistPickerSheet';
+import { PressableScale } from '@/components/PressableScale';
 import { QuickActionsSheet } from '@/components/QuickActionsSheet';
-import { TrackIndexRow, trackRowLayout } from '@/components/TrackRow';
-import { useTrackActionsMenu } from '@/components/useTrackActionsMenu';
-import { useTrackSelection } from '@/components/useTrackSelection';
+import { showToast } from '@/components/Toast';
+import { TrackListItem } from '@/components/TrackListItem';
+import { trackRowLayout } from '@/components/TrackRow';
+import { useTrackListActions } from '@/components/useTrackListActions';
+import { tapMedium } from '@/lib/haptics';
+import { useRouter } from '@/lib/useRouter';
 import { UNKNOWN_ARTIST } from '@/library/grouping';
 import { useLibrary } from '@/library/LibraryProvider';
 import { usePlaylistsContext } from '@/library/PlaylistsProvider';
 import type { LocalTrack } from '@/library/useAudioLibrary';
 import { usePlayer } from '@/player/PlayerProvider';
 import { useActiveTrack } from '@/player/usePlayback';
+
+import { countLabel } from '@/tabs/shared';
 
 function arrayMove<T>(list: T[], from: number, to: number): T[] {
   const next = list.slice();
@@ -31,17 +32,19 @@ function arrayMove<T>(list: T[], from: number, to: number): T[] {
 }
 
 /**
- * Détail d'une playlist (issue #14 + synchro #17) : lecture, réordonnancement, retrait, renommage,
- * suppression.
+ * Détail d'une playlist : lecture, réordonnancement par la poignée, retrait, ajout de titres,
+ * renommage, suppression.
  *
- * Chaque entrée est résolue depuis `tracksById` (toutes les pistes scannées, dossiers exclus
- * compris) via son id partagé → id media-store (cf. `track_registry`). Une piste sans fichier local
- * — typiquement une référence synchronisée depuis un autre appareil — reste affichée mais **grisée
- * et non jouable** (« indisponible »), au lieu d'être masquée : la playlist reste cohérente d'un
- * appareil à l'autre. La file de lecture ne contient que les pistes réellement jouables.
+ * Chaque entrée est résolue depuis `tracksById` via son id partagé → id media-store (cf.
+ * `track_registry`). Une piste sans fichier local — référence synchronisée depuis un autre
+ * appareil — reste affichée mais **grisée et non jouable**, pour que la playlist reste la même d'un
+ * appareil à l'autre. La file de lecture ne contient que les pistes jouables.
+ *
+ * L'appui long sur un titre ouvre la sélection multiple ; la liste passe alors en liste simple à
+ * cocher (glisser pour réordonner et cocher sont deux gestes qui ne cohabitent pas), avec une
+ * action « Retirer » en plus des actions habituelles.
  */
 export default function PlaylistScreen() {
-  const insets = useSafeAreaInsets();
   const router = useRouter();
   const params = useLocalSearchParams<{ id?: string }>();
   const id = params.id ?? '';
@@ -57,46 +60,59 @@ export default function PlaylistScreen() {
     deletePlaylist,
   } = usePlaylistsContext();
   const { playQueue } = usePlayer();
-  const activeTrack = useActiveTrack();
+  const activeId = useActiveTrack()?.mediaId;
 
   const [renaming, setRenaming] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [pickerTracks, setPickerTracks] = useState<LocalTrack[] | null>(null);
 
   const playlist = playlists.find((p) => p.id === id);
   const name = playlist?.name ?? 'Playlist';
+  const source = useMemo(() => ({ kind: 'playlist' as const, id, name }), [id, name]);
+  const context = `playlist:${id}` as const;
 
-  // Entrées de la playlist dans l'ordre, chacune résolue (ou non) vers un fichier local.
-  // `revision` force la relecture après mutation ou après un pull de synchro.
+  // Entrées dans l'ordre, chacune résolue (ou non) vers un fichier local. `revision` force la
+  // relecture après une mutation ou un pull de synchro.
   const entries = useMemo(() => {
-    return getEntries(id).map((entry) => {
-      const localTrack =
-        entry.localTrackId !== null ? (tracksById.get(entry.localTrackId) ?? null) : null;
-      return { entry, localTrack };
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void revision;
+    return getEntries(id).map((entry) => ({
+      entry,
+      localTrack: entry.localTrackId !== null ? (tracksById.get(entry.localTrackId) ?? null) : null,
+    }));
   }, [id, getEntries, tracksById, revision]);
 
-  // Pistes réellement jouables (fichier présent), pour la file de lecture.
   const playableTracks = useMemo<LocalTrack[]>(
     () => entries.map((e) => e.localTrack).filter((t): t is LocalTrack => t !== null),
     [entries]
   );
 
-  // Mode sélection multiple mutualisé : porte sur les pistes jouables (une entrée synchronisée sans
-  // fichier local n'est pas sélectionnable — aucune des actions ne s'y applique). En mode sélection,
-  // le rendu bascule de la liste réordonnable vers une liste simple à cocher (deux modes exclusifs).
-  const selection = useTrackSelection(playableTracks, { onAddToPlaylist: setPickerTracks });
-  const trackMenu = useTrackActionsMenu({ onSelect: selection.start });
+  const actions = useTrackListActions(playableTracks, {
+    extraAction: {
+      icon: 'close',
+      label: 'Retirer',
+      onPress: (selected) => {
+        const ids = new Set(selected.map((t) => t.id));
+        for (const { entry, localTrack } of entries) {
+          if (localTrack && ids.has(localTrack.id)) {
+            removeTrackFromPlaylist(id, entry.sharedTrackId);
+          }
+        }
+        showToast(
+          selected.length > 1 ? `${selected.length} titres retirés` : 'Titre retiré',
+          'playlist_add_check'
+        );
+      },
+    },
+  });
+  const { selection, onAdd, onPlayNext } = actions;
 
   const items = useMemo<DraggableTrackItem[]>(
     () =>
       entries.map(({ entry, localTrack }) => ({
-        // Clé = id partagé (stable, présent même sans fichier local) → surlignage/DnD cohérents.
+        // Clé = id partagé (stable, présent même sans fichier local).
         id: entry.sharedTrackId,
         title: localTrack?.title ?? entry.title ?? 'Titre inconnu',
         artist: localTrack?.artist ?? entry.artist ?? UNKNOWN_ARTIST,
-        artworkUri: localTrack?.artworkUri ?? localTrack?.coverArtUrl ?? null,
+        artworkUri: localTrack?.artworkUri ?? null,
         unavailable: localTrack === null,
       })),
     [entries]
@@ -104,23 +120,31 @@ export default function PlaylistScreen() {
 
   const count = entries.length;
   const unavailableCount = count - playableTracks.length;
+  const cover = playableTracks.map((t) => t.artworkUri).find(Boolean) ?? null;
 
-  // Id partagé de la piste en cours de lecture (le lecteur raisonne en id media-store).
+  // Id partagé de la piste en cours (le lecteur raisonne en id media-store).
   const activeSharedId = useMemo(
-    () => entries.find((e) => e.localTrack?.id === activeTrack?.mediaId)?.entry.sharedTrackId,
-    [entries, activeTrack?.mediaId]
+    () => entries.find((e) => e.localTrack?.id === activeId)?.entry.sharedTrackId,
+    [entries, activeId]
   );
 
-  // Lance la playlist à partir d'une entrée : ignore les indisponibles, démarre la file sur les
-  // pistes jouables au bon index.
-  const playFrom = (index: number) => {
+  // Lance la playlist depuis une entrée : les indisponibles sont sautées, la file démarre au bon
+  // index parmi les pistes jouables.
+  const playFromEntry = (index: number) => {
     const localTrack = entries[index]?.localTrack;
     if (!localTrack) {
       return;
     }
     const startIndex = playableTracks.findIndex((t) => t.id === localTrack.id);
-    void playQueue(playableTracks, startIndex < 0 ? 0 : startIndex, `playlist:${id}`);
+    playQueue(playableTracks, Math.max(0, startIndex), context, source);
   };
+
+  const playFromPlayable = useCallback(
+    (index: number) => playQueue(playableTracks, index, context, source),
+    [playQueue, playableTracks, context, source]
+  );
+
+  const addTitles = () => router.push({ pathname: '/playlist-add', params: { id } });
 
   const confirmDelete = () => {
     Alert.alert('Supprimer la playlist', `« ${name} » sera supprimée définitivement.`, [
@@ -138,122 +162,99 @@ export default function PlaylistScreen() {
     ]);
   };
 
-  return (
-    <View style={[styles.screen, { paddingTop: insets.top + spacing.sm }]}>
-      {/* Même motif d'en-tête que album/artiste (passe UX) : action primaire + un « … » qui
-          regroupe le reste dans une QuickActionsSheet, au lieu d'une rangée d'icônes. */}
-      <View style={styles.topBar}>
-        <BackButton onPress={() => router.back()} />
-        <View style={styles.topActions}>
-          <Pressable
-            onPress={() => router.push({ pathname: '/playlist-add', params: { id } })}
-            hitSlop={12}
-            accessibilityRole="button"
-            accessibilityLabel="Ajouter des titres"
-          >
-            <Icon name="add" size={26} color={colors.textPrimary} />
-          </Pressable>
-          <Pressable
-            onPress={() => setMenuOpen(true)}
-            hitSlop={12}
-            accessibilityRole="button"
-            accessibilityLabel="Plus d’actions"
-          >
-            <Icon name="more_horiz" size={26} color={colors.textPrimary} />
-          </Pressable>
-        </View>
-      </View>
+  const selectionMode = selection.active;
+  const { isSelected, toggle, start } = selection;
+  const renderSelectable = useCallback(
+    ({ item, index }: { item: LocalTrack; index: number }) => (
+      <TrackListItem
+        track={item}
+        index={index}
+        isActive={item.id === activeId}
+        onPlay={playFromPlayable}
+        onLongPress={start}
+        onAdd={onAdd}
+        onPlayNext={onPlayNext}
+        selectionMode={selectionMode}
+        selected={isSelected(item.id)}
+        onToggleSelect={toggle}
+      />
+    ),
+    [activeId, playFromPlayable, start, onAdd, onPlayNext, selectionMode, isSelected, toggle]
+  );
 
-      <View style={styles.header}>
-        <Text style={styles.title} numberOfLines={2}>
-          {name}
-        </Text>
-        <Text style={styles.count}>
-          {count} {count > 1 ? 'titres' : 'titre'}
-          {unavailableCount > 0
+  return (
+    <View style={styles.screen}>
+      <DetailTopBar>
+        <TopBarButton icon="add" label="Ajouter des titres" onPress={addTitles} />
+        <TopBarButton icon="more_horiz" label="Plus d’actions" onPress={() => setMenuOpen(true)} />
+      </DetailTopBar>
+
+      <DetailHero
+        kind="Playlist"
+        title={name}
+        meta={
+          countLabel(count, 'titre') +
+          (unavailableCount > 0
             ? ` · ${unavailableCount} indisponible${unavailableCount > 1 ? 's' : ''}`
-            : ''}
-        </Text>
-        {playableTracks.length > 0 && (
-          <Pressable
-            onPress={() => void playQueue(playableTracks, 0, `playlist:${id}`)}
-            style={({ pressed }) => [styles.playButton, pressed && styles.playButtonPressed]}
-            accessibilityRole="button"
-            accessibilityLabel="Lire la playlist"
-          >
-            <Icon name="play_arrow" size={22} color={colors.onAccent} />
-            <Text style={styles.playLabel}>Lire</Text>
-          </Pressable>
-        )}
-      </View>
+            : '')
+        }
+        cover={{ uri: cover, icon: 'queue_music', seed: name }}
+        tracks={playableTracks}
+        context={context}
+        source={source}
+      />
 
       {selection.header}
 
       {count === 0 ? (
         <View style={styles.centered}>
-          <Icon name="queue_music" size={40} color={colors.textMuted} />
           <Text style={styles.emptyText}>Playlist vide.</Text>
-          <Pressable
-            onPress={() => router.push({ pathname: '/playlist-add', params: { id } })}
-            style={({ pressed }) => [styles.emptyAddButton, pressed && styles.emptyAddPressed]}
+          <PressableScale
+            onPress={addTitles}
+            style={styles.emptyAdd}
             accessibilityRole="button"
             accessibilityLabel="Ajouter des titres"
           >
             <Icon name="add" size={20} color={colors.onAccent} />
             <Text style={styles.emptyAddLabel}>Ajouter des titres</Text>
-          </Pressable>
+          </PressableScale>
         </View>
-      ) : selection.active ? (
-        // Mode sélection : liste simple à cocher sur les seules pistes jouables (le réordonnancement
-        // est suspendu, les deux gestes — drag et coche — ne peuvent pas coexister proprement).
+      ) : selectionMode ? (
         <FlatList
           data={playableTracks}
           keyExtractor={(track) => track.id}
           getItemLayout={trackRowLayout}
-          windowSize={7}
+          renderItem={renderSelectable}
+          windowSize={9}
           initialNumToRender={12}
-          maxToRenderPerBatch={16}
-          renderItem={({ item, index }) => (
-            <TrackIndexRow
-              track={item}
-              index={index}
-              isActive={item.id === activeTrack?.mediaId}
-              onPlay={() => void playQueue(playableTracks, index, `playlist:${id}`)}
-              selectionMode
-              selected={selection.isSelected(item.id)}
-              onToggleSelect={selection.toggle}
-            />
-          )}
-          contentContainerStyle={{ paddingBottom: insets.bottom + spacing.xxl }}
+          contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
         />
       ) : (
         <DraggableTrackList
           items={items}
           activeTrackId={activeSharedId}
-          onPlay={playFrom}
+          onPlay={playFromEntry}
           onMove={(from, to) => {
-            // Interface d'abord : la liste est déjà réordonnée de façon optimiste par
-            // DraggableTrackList ; l'écriture SQLite + le refresh (re-rendu complet de l'écran)
-            // sortent de la frame du lâcher du geste, sinon le relâchement « accroche ».
+            // La liste est déjà réordonnée à l'écran ; l'écriture en base et le re-rendu de
+            // l'écran sortent de l'image du lâcher, sinon le relâchement « accroche ».
             const order = arrayMove(entries, from, to).map((e) => e.entry.sharedTrackId);
             setTimeout(() => reorderPlaylist(id, order), 0);
           }}
           onRemove={(index) => removeTrackFromPlaylist(id, entries[index].entry.sharedTrackId)}
-          // Appui long → menu d'actions, seulement pour une entrée résolue en fichier local
-          // (les pistes indisponibles n'exposent déjà pas le geste, cf. DraggableTrackList).
           onLongPress={(index) => {
             const localTrack = entries[index]?.localTrack;
             if (localTrack) {
-              trackMenu.open(localTrack);
+              start(localTrack);
             }
           }}
           removeLabel="Retirer de la playlist"
-          contentPaddingBottom={insets.bottom + spacing.xxl}
+          contentPaddingBottom={spacing.xxl}
         />
       )}
 
       {selection.footer}
+      {actions.element}
 
       <PlaylistNameDialog
         visible={renaming}
@@ -269,27 +270,11 @@ export default function PlaylistScreen() {
         title={name}
         onClose={() => setMenuOpen(false)}
         actions={[
+          { icon: 'add', label: 'Ajouter des titres', onPress: addTitles },
           { icon: 'edit', label: 'Renommer', onPress: () => setRenaming(true) },
-          {
-            icon: 'save',
-            label: 'Écrire les tags dans les fichiers',
-            onPress: () =>
-              router.push({
-                pathname: '/write-tags',
-                params: { scope: 'playlist', playlistId: id, label: name },
-              }),
-          },
-          // Destructive en dernier, comme sur les autres écrans.
+          // Destructive en dernier.
           { icon: 'delete', label: 'Supprimer la playlist', onPress: confirmDelete },
         ]}
-      />
-
-      {trackMenu.element}
-
-      <PlaylistPickerSheet
-        tracks={pickerTracks}
-        onClose={() => setPickerTracks(null)}
-        onAdded={selection.cancel}
       />
     </View>
   );
@@ -300,50 +285,8 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingRight: spacing.xxl,
-  },
-  topActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xl,
-  },
-  header: {
-    paddingHorizontal: spacing.xxl,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.lg,
-    gap: spacing.xs,
-  },
-  title: {
-    ...typography.display,
-    fontSize: 26,
-  },
-  count: {
-    ...typography.label,
-    color: colors.textMuted,
-    marginTop: spacing.xs,
-  },
-  playButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    gap: spacing.xs,
-    marginTop: spacing.md,
-    paddingHorizontal: spacing.xl,
-    paddingVertical: spacing.sm,
-    borderRadius: radii.pill,
-    backgroundColor: colors.accent,
-  },
-  playButtonPressed: {
-    opacity: 0.85,
-  },
-  playLabel: {
-    fontFamily: typography.heading.fontFamily,
-    fontSize: 14,
-    color: colors.onAccent,
+  listContent: {
+    paddingBottom: spacing.xxl,
   },
   centered: {
     flex: 1,
@@ -357,7 +300,7 @@ const styles = StyleSheet.create({
     ...typography.body,
     textAlign: 'center',
   },
-  emptyAddButton: {
+  emptyAdd: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
@@ -365,9 +308,6 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.xl,
-  },
-  emptyAddPressed: {
-    opacity: 0.7,
   },
   emptyAddLabel: {
     ...typography.heading,

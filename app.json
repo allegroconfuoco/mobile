@@ -2,7 +2,7 @@
   "expo": {
     "name": "Fuoco",
     "slug": "fuoco",
-    "version": "2.3.0",
+    "version": "3.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "fuoco",
@@ -22,7 +22,6 @@
       "versionCode": 1,
       "permissions": [
         "android.permission.POST_NOTIFICATIONS",
-        "android.permission.MANAGE_EXTERNAL_STORAGE",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",

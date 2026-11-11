@@ -12,14 +12,7 @@ import {
 import * as db from './db';
 import { displayFolder, folderOf, isAutoExcluded } from './folders';
 import { clearCoverCache, extractTrackTags, type TrackTags } from './trackTags';
-import {
-  buildAlbums,
-  sortTracks,
-  type AlbumGroup,
-  type ArtistGroup,
-  type TrackSort,
-} from './grouping';
-import { buildMergedArtists } from './artists';
+import { sortTracks, type TrackSort } from './grouping';
 
 /**
  * Un morceau audio détecté sur l'appareil.
@@ -58,10 +51,12 @@ export type LocalTrack = {
    * une ligne antérieure à la migration v16 sans date de modif.
    */
   addedAt: number | null;
-  /** MBID résolu par l'enrichissement MusicBrainz (issue #19), ou `null`. */
-  mbid: string | null;
-  /** URL de pochette distante (Cover Art Archive) issue de l'enrichissement, repli d'affichage. */
-  coverArtUrl: string | null;
+  /**
+   * URI `file://` résolue au scan. Sert à lancer la lecture **sans aller-retour natif** : la file
+   * se construit directement depuis la bibliothèque en mémoire. `null` si la résolution a échoué
+   * au scan (la lecture retente alors une résolution à la demande).
+   */
+  uri: string | null;
 };
 
 /** Un dossier de la bibliothèque, pour l'écran de réglages. */
@@ -108,11 +103,11 @@ function stripExtension(name: string): string {
 
 /**
  * Un fichier déjà connu doit être re-résolu (getUri + tags) si son **nom** ou sa **date de modif**
- * diffère du cache : signal d'un renommage « de propreté » ou d'une réécriture (ré-encodage/ré-tag).
- * Sans ça, le diff par id sautait ces fichiers et gardait un nom/tags périmés. L'id media-store
- * étant conservé au renommage, la ligne `tracks` est réécrite mais l'enrichissement MusicBrainz
- * (table séparée `track_enrichment`, clé = id) reste intact. Le nom se compare avec le même repli
- * que `toRow` pour ne pas déclencher un faux positif sur un media store sans nom de fichier.
+ * diffère du cache : signal d'un renommage ou d'une réécriture (ré-encodage, tags corrigés sur
+ * ordinateur). C'est ce qui fait remonter dans l'app une correction faite hors de l'app. L'id
+ * media-store étant conservé, playlists et favoris (clés par cet id) suivent sans rien faire. Le
+ * nom se compare avec le même repli que `toRow` pour ne pas déclencher un faux positif sur un
+ * media store sans nom de fichier.
  */
 function fileChanged(prev: db.TrackRow, meta: AssetMetadata): boolean {
   const nextFilename = meta.filename ?? 'Fichier inconnu';
@@ -145,9 +140,6 @@ function toRow(
     trackNo: tags.trackNo,
     discNo: tags.discNo,
     artworkUri: tags.artworkUri,
-    // Enrichissement (issue #19) : absent au scan, peuplé par le JOIN de `loadTracks`.
-    mbid: null,
-    coverArtUrl: null,
   };
 }
 
@@ -165,8 +157,7 @@ function rowToTrack(r: db.TrackRow): LocalTrack {
     discNo: r.discNo,
     artworkUri: r.artworkUri,
     addedAt: r.addedAt,
-    mbid: r.mbid,
-    coverArtUrl: r.coverArtUrl,
+    uri: r.uri,
   };
 }
 
@@ -251,10 +242,12 @@ type UseAudioLibrary = {
   trackSort: TrackSort;
   /** Change le tri de la liste des morceaux (titre / artiste). */
   setTrackSort: (sort: TrackSort) => void;
-  /** Artistes de la bibliothèque, agrégés et triés (onglet Artistes). */
-  artists: ArtistGroup[];
-  /** Albums de la bibliothèque, agrégés et triés (onglet Albums). */
-  albums: AlbumGroup[];
+  /**
+   * Pistes visibles dans leur ordre de base (indépendant du tri choisi). Sert de source stable aux
+   * regroupements par artiste et par album (cf. `derived.ts`) : changer le tri des morceaux ne les
+   * invalide pas.
+   */
+  visibleTracks: LocalTrack[];
   /**
    * Index de *toutes* les pistes scannées (dossiers exclus compris) par id.
    * Sert à résoudre les références d'une playlist en `LocalTrack` : une piste ajoutée à une
@@ -265,8 +258,7 @@ type UseAudioLibrary = {
   refreshing: boolean;
   /**
    * La passe de fond d'extraction des tags (passe 2 du scan) est en cours : la bibliothèque est
-   * affichable mais des titres/pochettes s'affinent encore. L'enrichissement MusicBrainz doit
-   * attendre sa fin (il a besoin des vrais tags, pas des noms de fichiers).
+   * affichable mais des titres/pochettes s'affinent encore.
    */
   tagging: boolean;
   error: string | null;
@@ -280,13 +272,13 @@ type UseAudioLibrary = {
   rescan: () => void;
   /**
    * Relit les pistes depuis SQLite sans re-scanner le media store. Sert à refléter une écriture
-   * hors scan (enrichissement MusicBrainz, issue #19) dans l'état affiché.
+   * hors scan (suppression d'un fichier) dans l'état affiché.
    */
   reloadTracks: () => void;
   /**
    * Vide le cache (pochettes disque + pistes scannées) et relance un scan complet qui le
    * reconstruit. Renvoie les octets de pochettes libérés. Ne touche à aucune donnée utilisateur
-   * (playlists, favoris, corrections MusicBrainz : tables séparées, conservées).
+   * (playlists, favoris, écoutes : tables séparées, conservées).
    */
   clearCache: () => Promise<number>;
   /** Inclut/exclut un dossier du scan. */
@@ -351,8 +343,7 @@ export function useAudioLibrary(): UseAudioLibrary {
 
       // Diff par id contre la base : on re-résout (getUri + tags) les fichiers *nouveaux*, mais
       // aussi ceux dont le nom ou la date de modif a changé (renommage, ré-encodage, ré-tag) — leur
-      // ligne `tracks` est réécrite pour refléter le fichier réel, l'enrichissement (table séparée,
-      // clé = id conservé) restant intact.
+      // ligne `tracks` est réécrite pour refléter le fichier réel.
       const knownById = new Map(db.loadTracks().map((t) => [t.id, t]));
       const seen = new Set<string>();
       const toResolve: AssetMetadata[] = [];
@@ -454,10 +445,6 @@ export function useAudioLibrary(): UseAudioLibrary {
 
   const tracks = useMemo(() => sortTracks(visibleTracks, trackSort), [visibleTracks, trackSort]);
 
-  // Vue fusionnée : les pistes multi-artistes sont rattachées aux artistes connus en solo.
-  const artists = useMemo(() => buildMergedArtists(visibleTracks), [visibleTracks]);
-  const albums = useMemo(() => buildAlbums(visibleTracks), [visibleTracks]);
-
   // Index sur *toutes* les pistes (pas seulement les visibles) : les playlists doivent pouvoir
   // résoudre une piste même si son dossier est exclu de l'affichage biblio.
   const tracksById = useMemo(() => {
@@ -496,13 +483,13 @@ export function useAudioLibrary(): UseAudioLibrary {
   // Relecture SQLite pure (pas de scan) : source de vérité déjà à jour après une écriture hors scan.
   const reloadTracks = useCallback(() => setAllTracks(db.loadTracks()), []);
 
-  // Vide le cache (pochettes disque + table `tracks` dérivée) puis relance un scan complet qui le
-  // reconstruit. Renvoie les octets de pochettes libérés. Playlists/favoris/corrections préservés
-  // (tables séparées). Le scan re-résout tous les fichiers (`tracks` vide → tout est « nouveau »).
+  // Vide le cache (pochettes disque + lignes `tracks` invalidées) puis relance un scan complet qui
+  // le reconstruit. Renvoie les octets de pochettes libérés. Playlists, favoris et écoutes sont
+  // préservés (tables séparées), ainsi que la date d'ajout de chaque piste.
   const clearCache = useCallback(async (): Promise<number> => {
     const freed = clearCoverCache();
     db.clearTrackCache();
-    setAllTracks([]);
+    setAllTracks(db.loadTracks());
     await scan();
     return freed;
   }, [scan]);
@@ -558,8 +545,7 @@ export function useAudioLibrary(): UseAudioLibrary {
     tracks,
     trackSort,
     setTrackSort,
-    artists,
-    albums,
+    visibleTracks,
     tracksById,
     refreshing: (scanning && hasCache) || tagging,
     tagging,

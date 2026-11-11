@@ -5,9 +5,8 @@ import { BottomSheet } from '@/components/BottomSheet';
 import { Icon, type IconName } from '@/components/Icon';
 
 /**
- * Feuille basse d'actions génériques (lot 11 de l'audit) : remplace les rangées d'icônes
- * accumulées dans les en-têtes d'écran (album, artiste) par un unique bouton « … » qui ouvre
- * cette liste. Chaque action referme la feuille avant de s'exécuter (navigation le plus souvent).
+ * Feuille basse d'actions génériques, ouverte par un bouton « … » d'en-tête (playlist) ou par le
+ * titre de l'écran Lecture. Chaque action referme la feuille avant de s'exécuter.
  */
 
 export type QuickAction = {
@@ -26,12 +25,7 @@ export type QuickActionsSheetProps = {
 
 export function QuickActionsSheet({ visible, title, actions, onClose }: QuickActionsSheetProps) {
   return (
-    <BottomSheet visible={visible} onClose={onClose}>
-      {title ? (
-        <Text style={styles.header} numberOfLines={1}>
-          {title}
-        </Text>
-      ) : null}
+    <BottomSheet visible={visible} onClose={onClose} title={title}>
       {actions.map((action) => (
         <Pressable
           key={action.label}
@@ -44,8 +38,6 @@ export function QuickActionsSheet({ visible, title, actions, onClose }: QuickAct
           accessibilityRole="button"
           accessibilityLabel={action.label}
         >
-          {/* Mêmes couleur d'icône et hauteur de ligne que TrackActionsSheet : les deux feuilles
-              doivent être indiscernables à l'œil (passe UX), seules leurs APIs diffèrent. */}
           <Icon name={action.icon} size={22} color={colors.accentIcon} />
           <Text style={styles.rowLabel}>{action.label}</Text>
         </Pressable>
@@ -55,12 +47,6 @@ export function QuickActionsSheet({ visible, title, actions, onClose }: QuickAct
 }
 
 const styles = StyleSheet.create({
-  header: {
-    ...typography.label,
-    color: colors.textMuted,
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.md,
-  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

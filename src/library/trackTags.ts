@@ -1,17 +1,14 @@
 /**
- * Lecture des tags d'un fichier audio du media store — couche IO native.
+ * Lecture des tags d'un fichier audio — couche IO native, appelée uniquement par le scan.
  *
- * Enchaîne : `Asset.getUri()` (→ chemin `file://` sur Android) → lecture *partielle* du
- * fichier (uniquement l'en-tête ID3, pas tout le MP3) → parsing pur JS (`./id3`) →
- * extraction de la pochette écrite en cache disque.
+ * Lecture *partielle* du fichier (uniquement l'en-tête ID3, pas tout le MP3) → parsing pur JS
+ * (`./id3`) → extraction de la pochette, écrite en cache disque. Les tags texte partent ensuite
+ * en base (`db.updateScannedTags`) : c'est la base, rechargée au démarrage, qui sert l'affichage
+ * et la lecture — rien n'est relu dans les fichiers en dehors du scan.
  *
- * Deux caches pour éviter de relire à chaque rendu de ligne :
- * - `tagsCache` : les tags texte (petits) restent en mémoire pour la session.
- * - la pochette est persistée sur disque ; on ne garde que son URI, jamais les octets.
- *   Sur une biblio de milliers de titres, ça évite de saturer la mémoire.
+ * La pochette est persistée sur disque ; on ne garde que son URI, jamais les octets.
  */
 import { Platform } from 'react-native';
-import { Asset } from 'expo-media-library';
 import { Directory, File, FileMode, Paths } from 'expo-file-system';
 
 import { hasId3v2, id3v2BodySize, mergeTags, parseId3v1, parseId3v2, type ParsedTags } from './id3';
@@ -42,10 +39,6 @@ const EMPTY_TAGS: TrackTags = {
 };
 
 const isSupported = Platform.OS !== 'web';
-
-// Cache mémoire des tags résolus + déduplication des lectures concurrentes.
-const tagsCache = new Map<string, TrackTags>();
-const inFlight = new Map<string, Promise<TrackTags>>();
 
 const COVERS_DIR = 'track-covers';
 
@@ -81,13 +74,10 @@ export function coverCacheSize(): number {
 }
 
 /**
- * Vide le cache des pochettes : supprime le dossier disque et les caches mémoire (tags résolus).
- * Purement dérivé des fichiers : les pochettes sont ré-extraites au prochain scan. Renvoie le
- * nombre d'octets libérés (0 sur web).
+ * Vide le cache des pochettes : supprime le dossier disque. Purement dérivé des fichiers : les
+ * pochettes sont ré-extraites au prochain scan. Renvoie le nombre d'octets libérés (0 sur web).
  */
 export function clearCoverCache(): number {
-  tagsCache.clear();
-  inFlight.clear();
   if (!isSupported) {
     return 0;
   }
@@ -171,11 +161,8 @@ function readParsedTags(uri: string): ParsedTags | null {
 }
 
 /**
- * Extrait et met en cache les tags d'une piste dont l'URI `file://` est déjà connue.
- *
- * Entièrement synchrone (lecture partielle + parsing + écriture pochette) : le scan de la
- * bibliothèque, qui résout déjà l'URI via `getUri`, s'en sert pour peupler la base *et* le
- * cache mémoire d'un coup, sans second aller-retour au media store.
+ * Extrait les tags d'une piste dont l'URI `file://` est déjà connue (résolue par le scan).
+ * Entièrement synchrone : lecture partielle + parsing + écriture de la pochette.
  */
 export function extractTrackTags(assetId: string, uri: string): TrackTags {
   if (!isSupported) {
@@ -203,51 +190,5 @@ export function extractTrackTags(assetId: string, uri: string): TrackTags {
     discNo: parsed?.discNo ?? null,
     artworkUri,
   };
-  tagsCache.set(assetId, tags);
   return tags;
-}
-
-async function resolveTags(assetId: string): Promise<TrackTags> {
-  if (!isSupported) {
-    return EMPTY_TAGS;
-  }
-  let uri: string;
-  try {
-    uri = await new Asset(assetId).getUri();
-  } catch (e) {
-    console.warn('[trackTags] URI introuvable', e);
-    return EMPTY_TAGS;
-  }
-  return extractTrackTags(assetId, uri);
-}
-
-/**
- * Résout les tags d'une piste (idempotent, mis en cache).
- *
- * Les appels concurrents pour le même `assetId` partagent une seule lecture.
- */
-export function readTrackTags(assetId: string): Promise<TrackTags> {
-  const cached = tagsCache.get(assetId);
-  if (cached) {
-    return Promise.resolve(cached);
-  }
-  const pending = inFlight.get(assetId);
-  if (pending) {
-    return pending;
-  }
-  const promise = resolveTags(assetId)
-    .then((tags) => {
-      tagsCache.set(assetId, tags);
-      return tags;
-    })
-    .finally(() => {
-      inFlight.delete(assetId);
-    });
-  inFlight.set(assetId, promise);
-  return promise;
-}
-
-/** Tags déjà en cache pour cet ID, ou `null` si pas encore lus. */
-export function peekTrackTags(assetId: string): TrackTags | null {
-  return tagsCache.get(assetId) ?? null;
 }

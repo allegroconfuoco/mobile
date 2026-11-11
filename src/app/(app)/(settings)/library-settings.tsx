@@ -85,7 +85,7 @@ export default function LibrarySettingsScreen() {
       </View>
 
       <ScrollView
-        contentContainerStyle={{ paddingBottom: insets.bottom + spacing.xxl }}
+        contentContainerStyle={{ paddingBottom: spacing.xxl }}
         showsVerticalScrollIndicator={false}
       >
         {/* La gravure de masse (« Écrire dans les fichiers ») a déménagé dans le hub

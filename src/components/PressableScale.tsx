@@ -1,29 +1,28 @@
-import { useState, type ReactNode } from 'react';
+import { type ReactNode } from 'react';
 import {
-  Animated,
   Pressable,
   type GestureResponderEvent,
   type PressableProps,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
+import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 
 import { tapLight } from '@/lib/haptics';
+import { SPRING_BOUNCY } from '@/lib/motion';
 
 /**
- * `Pressable` qui rétrécit légèrement à l'appui (retour tactile « physique »).
+ * `Pressable` qui rétrécit à l'appui puis revient avec un léger rebond (retour tactile
+ * « physique »). L'échelle est animée sur le thread d'interface : la réponse au doigt ne dépend
+ * pas de la charge du JS.
  *
- * Animation via l'API `Animated` du cœur RN (pas de Reanimated : cf. parti pris projet, aucun
- * rebuild natif). Le `scale` descend à `activeScale` au press-in via un `spring`, remonte à 1 au
- * press-out. Haptique légère optionnelle au press-in.
- *
- * S'utilise comme un `Pressable` : `style` s'applique au conteneur animé, le reste des props
+ * S'utilise comme un `Pressable` : `style` s'applique à la zone pressable, le reste des props
  * (`onPress`, `accessibilityRole`…) est transmis tel quel.
  */
 type PressableScaleProps = Omit<PressableProps, 'style'> & {
   children: ReactNode;
   style?: StyleProp<ViewStyle>;
-  /** Facteur d'échelle à l'appui (défaut 0.96). */
+  /** Facteur d'échelle à l'appui (défaut 0.94). */
   activeScale?: number;
   /** Déclenche une haptique légère au press-in. */
   haptic?: boolean;
@@ -32,40 +31,32 @@ type PressableScaleProps = Omit<PressableProps, 'style'> & {
 export function PressableScale({
   children,
   style,
-  activeScale = 0.96,
+  activeScale = 0.94,
   haptic = false,
   onPressIn,
   onPressOut,
   ...rest
 }: PressableScaleProps) {
-  const [scale] = useState(() => new Animated.Value(1));
-
-  const animateTo = (to: number) => {
-    Animated.spring(scale, {
-      toValue: to,
-      useNativeDriver: true,
-      speed: 40,
-      bounciness: 6,
-    }).start();
-  };
+  const scale = useSharedValue(1);
+  const animatedStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.get() }] }));
 
   const handlePressIn = (e: GestureResponderEvent) => {
     if (haptic) {
       tapLight();
     }
-    animateTo(activeScale);
+    scale.set(withSpring(activeScale, SPRING_BOUNCY));
     onPressIn?.(e);
   };
 
   const handlePressOut = (e: GestureResponderEvent) => {
-    animateTo(1);
+    scale.set(withSpring(1, SPRING_BOUNCY));
     onPressOut?.(e);
   };
 
   // Le `style` va sur le `Pressable` (layout + visuel des enfants) ; le conteneur animé ne porte
   // que la transformation d'échelle, pour ne pas perturber la disposition (lignes, padding…).
   return (
-    <Animated.View style={{ transform: [{ scale }] }}>
+    <Animated.View style={animatedStyle}>
       <Pressable style={style} onPressIn={handlePressIn} onPressOut={handlePressOut} {...rest}>
         {children}
       </Pressable>
