@@ -1,15 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  Animated,
-  type LayoutChangeEvent,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { useEffect } from 'react';
+import { Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
+import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 
 import { colors, spacing, typography } from '@/theme';
+import { selection as hapticSelection } from '@/lib/haptics';
+import { SPRING_SNAPPY, useSpringFlag } from '@/lib/motion';
 
 /** Une option du sélecteur. */
 export type Segment<T extends string> = {
@@ -23,118 +18,135 @@ type SegmentedControlProps<T extends string> = {
   onChange: (value: T) => void;
 };
 
+type Box = { x: number; width: number };
+
 /**
- * Sélecteur de vue « Forge » : à plat, labels en majuscules, liseré accent **glissant** sous
- * l'option active (motion design, API Animated du cœur RN). On mesure la position/largeur de
- * chaque option (`onLayout`) puis on anime l'indicateur vers l'option sélectionnée. Défilable
- * horizontalement pour absorber un nombre variable d'options sans clipper.
+ * Sélecteur de vue : à plat, labels en majuscules, liseré accent qui **glisse** sous l'option
+ * active. On mesure la position et la largeur de chaque option, puis le liseré s'y rend sur un
+ * ressort, calculé sur le thread d'interface.
  */
 export function SegmentedControl<T extends string>({
   segments,
   value,
   onChange,
 }: SegmentedControlProps<T>) {
-  // Positions mesurées de chaque option (x + largeur) dans la zone défilante.
-  const layouts = useRef<Record<string, { x: number; width: number }>>({});
-  const [translateX] = useState(() => new Animated.Value(0));
-  const [width] = useState(() => new Animated.Value(0));
-  // La première mise en place se fait sans animation (pas de « saut » depuis 0 au montage).
-  const animatedOnce = useRef(false);
-
-  const moveTo = useCallback(
-    (key: string, animate: boolean) => {
-      const layout = layouts.current[key];
-      if (!layout) {
-        return;
-      }
-      if (animate) {
-        // useNativeDriver:false car on anime la largeur (propriété de layout).
-        Animated.parallel([
-          Animated.spring(translateX, {
-            toValue: layout.x,
-            useNativeDriver: false,
-            speed: 20,
-            bounciness: 2,
-          }),
-          Animated.spring(width, {
-            toValue: layout.width,
-            useNativeDriver: false,
-            speed: 20,
-            bounciness: 2,
-          }),
-        ]).start();
-      } else {
-        translateX.setValue(layout.x);
-        width.setValue(layout.width);
-      }
-    },
-    [translateX, width]
-  );
+  // Boîtes mesurées de chaque option, indexées comme `segments`. Valeur partagée : le liseré se
+  // place sur le thread d'interface dès que la mesure arrive, sans re-rendu.
+  const boxes = useSharedValue<Box[]>([]);
+  const index = segments.findIndex((s) => s.value === value);
+  const active = useSharedValue(index);
+  // Faux tant que le liseré n'a pas été posé une première fois : la pose initiale est immédiate.
+  const placed = useSharedValue(false);
 
   useEffect(() => {
-    moveTo(value, animatedOnce.current);
-    animatedOnce.current = true;
-  }, [value, moveTo]);
+    active.set(index);
+  }, [index, active]);
 
-  const onItemLayout = (key: string, e: LayoutChangeEvent) => {
-    const { x, width: w } = e.nativeEvent.layout;
-    layouts.current[key] = { x, width: w };
-    // Positionne l'indicateur dès que l'option active est mesurée (sans animation).
-    if (key === value) {
-      moveTo(value, false);
-    }
+  const onItemLayout = (i: number, e: LayoutChangeEvent) => {
+    const { x, width } = e.nativeEvent.layout;
+    boxes.modify((current) => {
+      'worklet';
+      current[i] = { x, width };
+      return current;
+    });
   };
+
+  const indicatorStyle = useAnimatedStyle(() => {
+    const box = boxes.get()[active.get()];
+    if (!box) {
+      return { opacity: 0 };
+    }
+    if (!placed.get()) {
+      placed.set(true);
+      return { opacity: 1, width: box.width, transform: [{ translateX: box.x }] };
+    }
+    return {
+      opacity: 1,
+      width: withSpring(box.width, SPRING_SNAPPY),
+      transform: [{ translateX: withSpring(box.x, SPRING_SNAPPY) }],
+    };
+  });
 
   return (
     <View style={styles.container}>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.row}
-      >
-        {segments.map((seg) => {
-          const active = seg.value === value;
-          return (
-            <Pressable
-              key={seg.value}
-              onLayout={(e) => onItemLayout(seg.value, e)}
-              onPress={() => onChange(seg.value)}
-              style={styles.item}
-              accessibilityRole="tab"
-              accessibilityState={{ selected: active }}
-              accessibilityLabel={seg.label}
-            >
-              <Text style={[styles.label, active && styles.labelActive]}>{seg.label}</Text>
-            </Pressable>
-          );
-        })}
-        <Animated.View style={[styles.indicator, { width, transform: [{ translateX }] }]} />
-      </ScrollView>
+      <View style={styles.row}>
+        {segments.map((segment, i) => (
+          <SegmentItem
+            key={segment.value}
+            label={segment.label}
+            active={segment.value === value}
+            onLayout={(e) => onItemLayout(i, e)}
+            onPress={() => {
+              if (segment.value !== value) {
+                hapticSelection();
+                onChange(segment.value);
+              }
+            }}
+          />
+        ))}
+        <Animated.View style={[styles.indicator, indicatorStyle]} pointerEvents="none" />
+      </View>
     </View>
+  );
+}
+
+function SegmentItem({
+  label,
+  active,
+  onLayout,
+  onPress,
+}: {
+  label: string;
+  active: boolean;
+  onLayout: (e: LayoutChangeEvent) => void;
+  onPress: () => void;
+}) {
+  const on = useSpringFlag(active);
+  const activeStyle = useAnimatedStyle(() => ({ opacity: on.get() }));
+  return (
+    <Pressable
+      onLayout={onLayout}
+      onPress={onPress}
+      hitSlop={6}
+      style={styles.item}
+      accessibilityRole="tab"
+      accessibilityState={{ selected: active }}
+      accessibilityLabel={label}
+    >
+      {/* Deux libellés superposés fondus l'un dans l'autre (cf. TabBar). */}
+      <Text style={styles.label}>{label}</Text>
+      <Animated.View style={[styles.activeLayer, activeStyle]}>
+        <Text style={[styles.label, styles.labelActive]}>{label}</Text>
+      </Animated.View>
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     borderBottomWidth: 1,
-    borderBottomColor: colors.borderFaint,
+    borderBottomColor: colors.border,
   },
   row: {
     flexDirection: 'row',
-    paddingHorizontal: spacing.xxl,
     gap: spacing.xl,
+    paddingHorizontal: spacing.xxl,
   },
   item: {
-    paddingBottom: spacing.md,
+    paddingVertical: spacing.md,
   },
   label: {
     ...typography.label,
     color: colors.textMuted,
   },
+  activeLayer: {
+    position: 'absolute',
+    top: spacing.md,
+    left: 0,
+  },
   labelActive: {
     color: colors.textPrimary,
   },
-  // Liseré actif glissant : posé au bas de la zone défilante, positionné/dimensionné par animation.
   indicator: {
     position: 'absolute',
     left: 0,

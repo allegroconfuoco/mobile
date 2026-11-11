@@ -9,7 +9,7 @@ import { Icon } from '@/components/Icon';
 import { ToastHost, showToast } from '@/components/Toast';
 import { DraggableTrackList, type DraggableTrackItem } from '@/components/DraggableTrackList';
 import { usePlayer, useQueue } from '@/player/PlayerProvider';
-import { usePlayback } from '@/player/usePlayback';
+import { useActiveTrack } from '@/player/usePlayback';
 import { tapMedium } from '@/lib/haptics';
 
 /**
@@ -23,7 +23,7 @@ export default function QueueScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { tracks } = useQueue();
-  const { track: activeTrack } = usePlayback();
+  const activeTrack = useActiveTrack();
   const { skipToIndex, moveInQueue, removeFromQueue, clearQueue } = usePlayer();
 
   const confirmClear = () => {
@@ -34,7 +34,7 @@ export default function QueueScreen() {
         style: 'destructive',
         onPress: () => {
           tapMedium();
-          void clearQueue();
+          clearQueue();
           showToast('File vidée', 'delete_sweep');
         },
       },
@@ -96,15 +96,15 @@ export default function QueueScreen() {
         <DraggableTrackList
           items={items}
           activeTrackId={activeTrack?.mediaId}
-          onPlay={(index) => void skipToIndex(index)}
-          onMove={(from, to) => void moveInQueue(from, to)}
-          onRemove={(index) => void removeFromQueue(index)}
+          onPlay={skipToIndex}
+          onMove={moveInQueue}
+          onRemove={removeFromQueue}
           removeLabel="Retirer de la file"
           contentPaddingBottom={insets.bottom + spacing.xxl}
         />
       )}
 
-      {/* Modal natif : le host racine ne passe pas au-dessus, on monte le nôtre (cf. Toast.tsx). */}
+      {/* Toast propre à cet écran, posé au-dessus de son bas (cf. Toast.tsx). */}
       <ToastHost variant="modal" />
     </View>
   );

@@ -3,7 +3,7 @@ import type { MediaItem } from '@rntp/player';
 /**
  * Cœur **pur** de l'enregistreur d'écoutes (issue #25) — aucune dépendance runtime (seul le type
  * `MediaItem` de @rntp/player est importé, effacé à la compilation), donc testable au harnais
- * tsx. Le câblage réel (base, horloge, incognito) vit dans `playRecorder.ts`.
+ * tsx. Le câblage réel (base, horloge) vit dans `playRecorder.ts`.
  *
  * Une **session** = une piste active. Le temps écouté est le **cumul des ticks de progression**
  * (1 s, émis uniquement en lecture, cf. `setup.ts`) : robuste aux seeks, aucune position de fin à
@@ -19,6 +19,7 @@ export type PlayContext =
   | 'album'
   | 'artist'
   | 'favorites'
+  | 'recent'
   | 'queue'
   | 'history'
   | 'stats'
@@ -44,8 +45,6 @@ export type PlayDraft = {
 export type RecorderDeps = {
   now: () => number;
   newId: () => string;
-  /** Mode « écoute privée » : quand actif, aucun flush n'écrit (la session continue en mémoire). */
-  isIncognito: () => boolean;
   persist: (draft: PlayDraft) => void;
 };
 
@@ -104,7 +103,7 @@ export function createPlayRecorder(deps: RecorderDeps): PlayRecorder {
     if (final) {
       session = null;
     }
-    if (!current || current.playedMs < MIN_SESSION_MS || deps.isIncognito()) {
+    if (!current || current.playedMs < MIN_SESSION_MS) {
       return;
     }
     deps.persist({
@@ -130,7 +129,7 @@ export function createPlayRecorder(deps: RecorderDeps): PlayRecorder {
 
     onTrackChanged(next) {
       flush(true);
-      // `toPlayerTrack` pose toujours l'id media-store en `mediaId` ; sans lui (piste étrangère
+      // `toMediaItem` pose toujours l'id media-store en `mediaId` ; sans lui (piste étrangère
       // au modèle, ne devrait pas arriver), on n'enregistre rien.
       if (next?.mediaId == null) {
         return;

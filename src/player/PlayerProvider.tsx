@@ -12,10 +12,13 @@ import { AppState, Platform } from 'react-native';
 import TrackPlayer, { Event, RepeatMode, type MediaItem } from '@rntp/player';
 
 import { type LocalTrack } from '@/library/useAudioLibrary';
+import { useLibrary } from '@/library/LibraryProvider';
 import * as db from '@/library/db';
 import { setPlayContext, type PlayContext } from './playRecorder';
+import { setQueueSource, type QueueSource } from './queueSource';
+import { loadResumePoint } from './resumeState';
 import { ensurePlayerReady, reassertCommands } from './setup';
-import { resolvePlayerTracks } from './track';
+import { toMediaItems } from './track';
 import { planMoves, restoreOrder, shuffleAfter } from './shuffle';
 import { requestNotificationPermission } from './notifPermission';
 
@@ -54,14 +57,20 @@ function nextRepeat(mode: RepeatMode): RepeatMode {
 /** Commandes de lecture exposées à l'UI. L'état réactif, lui, passe par `usePlayback`. */
 export type PlayerActions = {
   /**
-   * Charge `tracks` comme file de lecture et démarre à l'index `startIndex`.
-   * Les titres dont l'URI est introuvable sont ignorés ; l'index de départ est réaligné
-   * sur le titre réellement tapé pour rester juste malgré ces trous.
-   * `context` = provenance du lancement, enregistrée avec l'historique d'écoute (#25).
+   * Charge `tracks` comme file de lecture et démarre à l'index `startIndex`. **Synchrone** : la
+   * file se construit depuis la bibliothèque en mémoire, le son part dans la foulée du tap.
+   * `context` = provenance pour l'historique d'écoute ; `source` = d'où vient la file, pour y
+   * retourner depuis l'écran Lecture (playlist, album, artiste).
    */
-  playQueue: (tracks: LocalTrack[], startIndex: number, context?: PlayContext) => Promise<void>;
-  togglePlayPause: () => Promise<void>;
+  playQueue: (
+    tracks: LocalTrack[],
+    startIndex: number,
+    context?: PlayContext,
+    source?: QueueSource | null
+  ) => void;
+  togglePlayPause: () => void;
   skipToNext: () => void;
+  /** « Précédent » intelligent (> 3 s de lecture = redémarrer la piste), comme la notification. */
   skipToPrevious: () => void;
   /** Position absolue en secondes. */
   seekTo: (seconds: number) => void;
@@ -70,17 +79,17 @@ export type PlayerActions = {
 /** Gestion de la file de lecture : mutations + saut direct à un index. */
 export type QueueActions = {
   /** Ajoute `tracks` à la fin de la file (sans changer la lecture en cours). */
-  addToQueue: (tracks: LocalTrack[]) => Promise<void>;
+  addToQueue: (tracks: LocalTrack[]) => void;
   /** Insère `tracks` juste après la piste courante (« Lire ensuite »). */
-  playNext: (tracks: LocalTrack[]) => Promise<void>;
+  playNext: (tracks: LocalTrack[]) => void;
   /** Retire la piste à `index` de la file. */
-  removeFromQueue: (index: number) => Promise<void>;
+  removeFromQueue: (index: number) => void;
   /** Déplace la piste de `fromIndex` vers `toIndex` (réordonnancement). */
-  moveInQueue: (fromIndex: number, toIndex: number) => Promise<void>;
+  moveInQueue: (fromIndex: number, toIndex: number) => void;
   /** Saute à la piste `index` de la file et lance la lecture. */
-  skipToIndex: (index: number) => Promise<void>;
+  skipToIndex: (index: number) => void;
   /** Vide la file en conservant la piste en cours (ou tout, si rien ne joue). */
-  clearQueue: () => Promise<void>;
+  clearQueue: () => void;
 };
 
 /** Instantané réactif de la file, pour l'affichage. */
@@ -88,9 +97,15 @@ export type QueueState = {
   tracks: MediaItem[];
   /** Index de la piste en cours dans `tracks`, ou `undefined` si la file est vide. */
   activeIndex: number | undefined;
+  /**
+   * Non nul quand la file affichée est la **session restaurée** de la dernière utilisation, pas
+   * encore chargée dans le lecteur natif : c'est la position (ms) à laquelle la lecture reprendra.
+   * `null` dès que la file est réellement dans le lecteur.
+   */
+  restoredPositionMs: number | null;
 };
 
-/** Mode de lecture : répétition + lecture aléatoire (finition Phase 1). */
+/** Mode de lecture : répétition + lecture aléatoire. */
 export type PlaybackMode = {
   /** Mode de répétition courant (Off / File / Piste). */
   repeatMode: RepeatMode;
@@ -108,16 +123,69 @@ const PlayerContext = createContext<(PlayerActions & QueueActions) | null>(null)
 const QueueContext = createContext<QueueState | null>(null);
 const PlaybackModeContext = createContext<PlaybackMode | null>(null);
 
+const EMPTY_QUEUE: QueueState = { tracks: [], activeIndex: undefined, restoredPositionMs: null };
+
+/** File réellement chargée dans le lecteur natif (vide avant le setup, ou sur le web). */
+function readNativeQueue(): QueueState {
+  if (Platform.OS === 'web') {
+    return EMPTY_QUEUE;
+  }
+  try {
+    return {
+      tracks: TrackPlayer.getQueue(),
+      activeIndex: TrackPlayer.getActiveMediaItemIndex() ?? undefined,
+      restoredPositionMs: null,
+    };
+  } catch {
+    return EMPTY_QUEUE;
+  }
+}
+
+/**
+ * Reconstruit la dernière session d'écoute depuis le point de reprise (ids + index + position),
+ * résolue contre la bibliothèque courante. Les fichiers disparus depuis sont omis, et l'index se
+ * recale sur la piste interrompue si elle est encore là, sinon sur la suivante disponible.
+ */
+function readRestoredQueue(tracksById: Map<string, LocalTrack>): QueueState | null {
+  const point = loadResumePoint();
+  if (!point) {
+    return null;
+  }
+  const locals: LocalTrack[] = [];
+  let index = -1;
+  for (let i = 0; i < point.trackIds.length; i++) {
+    const track = tracksById.get(point.trackIds[i]);
+    if (!track) {
+      continue;
+    }
+    if (index === -1 && i >= point.index) {
+      index = locals.length;
+    }
+    locals.push(track);
+  }
+  const tracks = toMediaItems(locals);
+  if (tracks.length === 0) {
+    return null;
+  }
+  const activeIndex = Math.min(Math.max(index, 0), tracks.length - 1);
+  // Reprendre à la position n'a de sens que sur la piste réellement interrompue.
+  const exact = tracks[activeIndex].mediaId === point.trackIds[point.index];
+  return { tracks, activeIndex, restoredPositionMs: exact ? Math.max(0, point.positionMs) : 0 };
+}
+
 /**
  * Monte le lecteur et fournit ses commandes à l'arbre.
  *
- * L'initialisation est paresseuse et idempotente (cf. `ensurePlayerReady`) : chaque action
- * s'assure que le lecteur est prêt avant d'agir, donc un tap très précoce n'est jamais perdu.
- *
  * L'API @rntp/player v5 est **synchrone** (TurboModule) : les lectures d'état (`getQueue`,
  * `getActiveMediaItemIndex`) sont atomiques du point de vue JS, et le natif (MediaController
- * Media3) est l'unique source de vérité — plus de chaîne de sérialisation ni de numéros de
- * séquence, la classe entière de bugs « snapshot désynchronisé » de l'alpha disparaît.
+ * Media3) est l'unique source de vérité. Les commandes le sont donc aussi : aucune ne renvoie de
+ * promesse, le son part dans le même tour de boucle que le tap.
+ *
+ * **Session restaurée.** À l'ouverture, si le lecteur natif est vide, la file affichée est celle
+ * de la dernière utilisation (cf. `resumeState`), à l'arrêt. Elle n'est *pas* chargée dans le
+ * lecteur natif tant que l'utilisateur ne fait rien : charger une file, même en pause, réveille le
+ * service média et sa notification, ce qu'on ne veut pas à chaque lancement. Elle est
+ * « matérialisée » à la première commande (lecture, saut, ajout à la file).
  *
  * On garde le **shuffle « physique » maison** (réordonnancement réel de la file) plutôt que le
  * `setShuffleEnabled` natif : celui-ci mélange l'ordre de LECTURE de Media3 sans toucher à
@@ -128,25 +196,22 @@ const PlaybackModeContext = createContext<PlaybackMode | null>(null);
  * que le *snapshot* de la file (`QueueState`) change à chaque mutation ou avancement de piste.
  */
 export function PlayerProvider({ children }: { children: ReactNode }) {
-  // Initialiseur paresseux : au (re)montage, on relit l'état natif si le lecteur existe déjà
-  // (rechargement à chaud pendant une lecture) — avant tout setup, les lectures natives
-  // retombent proprement sur « file vide ». L'effet plus bas ne fait que s'abonner
-  // (règle react-hooks/set-state-in-effect).
-  const [queue, setQueue] = useState<QueueState>(() => {
-    if (Platform.OS === 'web') {
-      return { tracks: [], activeIndex: undefined };
-    }
-    try {
-      return {
-        tracks: TrackPlayer.getQueue(),
-        activeIndex: TrackPlayer.getActiveMediaItemIndex() ?? undefined,
-      };
-    } catch {
-      return { tracks: [], activeIndex: undefined };
-    }
-  });
+  const { tracksById } = useLibrary();
 
-  // Mode de lecture (finition Phase 1). État réactif pour l'UI + refs lues hors rendu dans les
+  // Initialiseur paresseux : la file native si le lecteur tourne déjà (rechargement à chaud, ou
+  // retour dans l'app pendant une lecture), sinon la session restaurée. La bibliothèque est
+  // chargée de façon synchrone depuis SQLite, donc `tracksById` est déjà peuplé ici.
+  const [queue, setQueue] = useState<QueueState>(() => {
+    const native = readNativeQueue();
+    if (native.tracks.length > 0) {
+      return native;
+    }
+    return readRestoredQueue(tracksById) ?? EMPTY_QUEUE;
+  });
+  // Miroir de la file restaurée, lu par les commandes hors rendu. `null` = la file est native.
+  const restoredRef = useRef<QueueState | null>(queue.restoredPositionMs !== null ? queue : null);
+
+  // Mode de lecture. État réactif pour l'UI + refs lues hors rendu dans les
   // handlers (évite les closures périmées). Valeurs initiales relues depuis les préférences.
   const [repeatMode, setRepeatMode] = useState<RepeatMode>(() =>
     repeatFromSetting(db.getSetting('playback.repeat'))
@@ -162,6 +227,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       return;
     }
     const tracks = TrackPlayer.getQueue();
+    // Tant que le natif est vide, la session restaurée reste affichée : les événements d'état du
+    // lecteur (émis dès le setup) ne doivent pas l'effacer.
+    if (tracks.length === 0 && restoredRef.current) {
+      return;
+    }
+    restoredRef.current = null;
     const activeIndex = TrackPlayer.getActiveMediaItemIndex() ?? undefined;
     setQueue((prev) => {
       // Bail-out d'identité : `PlaybackStateChanged` (play/pause/buffer) rappelle ce refresh en
@@ -169,13 +240,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       // re-rendait tous les consommateurs `useQueue` (et re-déclenchait la resync de la liste
       // réordonnable). Même séquence de `mediaId` + même piste active = snapshot inchangé.
       if (
+        prev.restoredPositionMs === null &&
         prev.activeIndex === activeIndex &&
         prev.tracks.length === tracks.length &&
         prev.tracks.every((t, i) => t.mediaId === tracks[i].mediaId)
       ) {
         return prev;
       }
-      return { tracks, activeIndex };
+      return { tracks, activeIndex, restoredPositionMs: null };
     });
   }, []);
 
@@ -201,54 +273,92 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     };
   }, [refreshQueue]);
 
-  // Applique le mode de répétition persisté une fois le lecteur prêt (le défaut est `Off`).
+  // Initialise le lecteur dès le montage plutôt qu'au premier tap : le setup (connexion au service
+  // média) est ainsi déjà payé quand l'utilisateur lance un titre. Fait dans un effet, donc après
+  // la première image. Le mode de répétition persisté est appliqué au passage (défaut `Off`).
   useEffect(() => {
     if (!ensurePlayerReady()) {
       return;
     }
     TrackPlayer.setRepeatMode(repeatFromSetting(db.getSetting('playback.repeat')));
-  }, []);
+    refreshQueue();
+  }, [refreshQueue]);
 
-  // Un seul lancement en vol à la fois : si deux `playQueue` se chevauchent (la résolution des
-  // URI est asynchrone), seul le plus récent a le droit de charger la file.
-  const playSeq = useRef(0);
+  /**
+   * Charge la session restaurée dans le lecteur natif, à l'index voulu, et rend la main.
+   * Renvoie `false` s'il n'y avait rien à matérialiser (la file est déjà native) : l'appelant
+   * exécute alors sa commande normalement.
+   */
+  const materialize = useCallback(
+    (index?: number): boolean => {
+      const restored = restoredRef.current;
+      if (!restored || !ensurePlayerReady()) {
+        return false;
+      }
+      restoredRef.current = null;
+      // Le service tournait déjà avec sa propre file (connexion tardive du contrôleur) : c'est
+      // elle qui fait foi.
+      if (TrackPlayer.getQueue().length > 0) {
+        refreshQueue();
+        return false;
+      }
+      const resumeIndex = restored.activeIndex ?? 0;
+      const target = index ?? resumeIndex;
+      requestNotificationPermission();
+      setPlayContext('resume');
+      TrackPlayer.setMediaItems(restored.tracks, target);
+      if (target === resumeIndex && (restored.restoredPositionMs ?? 0) > 0) {
+        TrackPlayer.seekTo((restored.restoredPositionMs ?? 0) / 1000);
+      }
+      reassertCommands();
+      return true;
+    },
+    [refreshQueue]
+  );
 
   const playQueue = useCallback(
-    async (tracks: LocalTrack[], startIndex: number, context?: PlayContext) => {
+    (
+      tracks: LocalTrack[],
+      startIndex: number,
+      context?: PlayContext,
+      source?: QueueSource | null
+    ) => {
       if (!ensurePlayerReady() || tracks.length === 0) {
         return;
       }
-      const seq = ++playSeq.current;
-      // Posé avant le chargement : le `MediaItemTransition` qui suit ouvre la session
-      // d'écoute avec cette provenance (#25).
+      const items = toMediaItems(tracks);
+      if (items.length === 0) {
+        return;
+      }
+      restoredRef.current = null;
+      // Posés avant le chargement : le `MediaItemTransition` qui suit ouvre la session d'écoute
+      // avec cette provenance.
       setPlayContext(context ?? null);
+      setQueueSource(source ?? null);
       // Android 13+ : sans elle, la notification média est masquée. Non bloquant (la lecture
       // démarre pendant que le dialogue système s'affiche), demandé au premier vrai besoin.
       requestNotificationPermission();
+      // Une piste sans URI a pu être omise : on réaligne l'index sur le titre réellement tapé.
       const targetId = tracks[startIndex]?.id;
-      const resolved = await resolvePlayerTracks(tracks);
-      if (resolved.length === 0 || seq !== playSeq.current) {
-        return;
-      }
       const resumeIndex = Math.max(
         0,
-        resolved.findIndex((track) => track.mediaId === targetId)
+        items.findIndex((item) => item.mediaId === targetId)
       );
 
       // En shuffle, l'ordre final est calculé AVANT de charger la file : on mélange la suite du
       // titre tapé (gardé en place par `shuffleAfter`, donc toujours à `resumeIndex`), puis on
       // charge la file déjà mélangée.
-      let finalTracks = resolved;
+      let finalItems = items;
       if (shuffleRef.current) {
-        const ids = resolved.map((t) => t.mediaId ?? '');
+        const ids = items.map((t) => t.mediaId ?? '');
         originalOrderRef.current = ids;
-        const byId = new Map(resolved.map((t) => [t.mediaId ?? '', t]));
-        finalTracks = shuffleAfter(ids, resumeIndex)
+        const byId = new Map(items.map((t) => [t.mediaId ?? '', t]));
+        finalItems = shuffleAfter(ids, resumeIndex)
           .map((id) => byId.get(id))
-          .filter((track): track is MediaItem => track !== undefined);
+          .filter((item): item is MediaItem => item !== undefined);
       }
 
-      TrackPlayer.setMediaItems(finalTracks, resumeIndex);
+      TrackPlayer.setMediaItems(finalItems, resumeIndex);
       TrackPlayer.play();
       // Le contrôleur natif est forcément connecté ici : on re-pose les commandes distantes pour
       // rattraper une rediffusion perdue à l'init (bouton suivant absent de la notif, cf. setup.ts).
@@ -258,8 +368,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     [refreshQueue]
   );
 
-  const togglePlayPause = useCallback(async () => {
+  const togglePlayPause = useCallback(() => {
     if (!ensurePlayerReady()) {
+      return;
+    }
+    if (materialize()) {
+      TrackPlayer.play();
+      refreshQueue();
       return;
     }
     if (TrackPlayer.isPlaying()) {
@@ -267,23 +382,63 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     } else {
       TrackPlayer.play();
     }
-  }, []);
+  }, [materialize, refreshQueue]);
+
+  const skipToIndex = useCallback(
+    (index: number) => {
+      if (!ensurePlayerReady()) {
+        return;
+      }
+      if (!materialize(index)) {
+        TrackPlayer.skipToIndex(index);
+      }
+      TrackPlayer.play();
+      refreshQueue();
+    },
+    [materialize, refreshQueue]
+  );
 
   const skipToNext = useCallback(() => {
-    if (ensurePlayerReady()) {
-      TrackPlayer.skipToNext();
+    if (!ensurePlayerReady()) {
+      return;
     }
-  }, []);
-  // « Précédent » intelligent (> 3 s de lecture = redémarrer la piste) : natif en v5.
+    const restored = restoredRef.current;
+    if (restored) {
+      // Session restaurée : « suivant » la matérialise directement sur la piste d'après.
+      const next = (restored.activeIndex ?? 0) + 1;
+      if (next < restored.tracks.length) {
+        skipToIndex(next);
+      }
+      return;
+    }
+    TrackPlayer.skipToNext();
+  }, [skipToIndex]);
+
   const skipToPrevious = useCallback(() => {
-    if (ensurePlayerReady()) {
-      TrackPlayer.skipToPrevious();
+    if (!ensurePlayerReady()) {
+      return;
     }
-  }, []);
+    const restored = restoredRef.current;
+    if (restored) {
+      skipToIndex(Math.max(0, (restored.activeIndex ?? 0) - 1));
+      return;
+    }
+    TrackPlayer.skipToPrevious();
+  }, [skipToIndex]);
+
   const seekTo = useCallback((seconds: number) => {
-    if (ensurePlayerReady()) {
-      TrackPlayer.seekTo(seconds);
+    if (!ensurePlayerReady()) {
+      return;
     }
+    const restored = restoredRef.current;
+    if (restored) {
+      // Rien n'est chargé : on déplace seulement le point où la lecture reprendra.
+      const next = { ...restored, restoredPositionMs: Math.max(0, Math.round(seconds * 1000)) };
+      restoredRef.current = next;
+      setQueue(next);
+      return;
+    }
+    TrackPlayer.seekTo(seconds);
   }, []);
 
   const cycleRepeat = useCallback(() => {
@@ -313,6 +468,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (!ensurePlayerReady()) {
       return;
     }
+    materialize();
     const currentIds = TrackPlayer.getQueue().map((t) => t.mediaId ?? '');
     if (currentIds.length === 0) {
       return;
@@ -331,82 +487,75 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       TrackPlayer.moveMediaItem(from, to);
     }
     refreshQueue();
-  }, [refreshQueue]);
+  }, [materialize, refreshQueue]);
 
   const addToQueue = useCallback(
-    async (tracks: LocalTrack[]) => {
+    (tracks: LocalTrack[]) => {
       if (!ensurePlayerReady()) {
         return;
       }
-      const resolved = await resolvePlayerTracks(tracks);
-      if (resolved.length === 0) {
+      const items = toMediaItems(tracks);
+      if (items.length === 0) {
         return;
       }
-      TrackPlayer.addMediaItems(resolved);
+      materialize();
+      TrackPlayer.addMediaItems(items);
       refreshQueue();
     },
-    [refreshQueue]
+    [materialize, refreshQueue]
   );
 
   const playNext = useCallback(
-    async (tracks: LocalTrack[]) => {
+    (tracks: LocalTrack[]) => {
       if (!ensurePlayerReady()) {
         return;
       }
-      const resolved = await resolvePlayerTracks(tracks);
-      if (resolved.length === 0) {
+      const items = toMediaItems(tracks);
+      if (items.length === 0) {
         return;
       }
+      materialize();
       // Sans piste active (file vide), on ajoute simplement à la fin.
       const activeIndex = TrackPlayer.getActiveMediaItemIndex();
       if (activeIndex != null) {
-        TrackPlayer.insertMediaItems(activeIndex + 1, resolved);
+        TrackPlayer.insertMediaItems(activeIndex + 1, items);
       } else {
-        TrackPlayer.addMediaItems(resolved);
+        TrackPlayer.addMediaItems(items);
       }
       refreshQueue();
     },
-    [refreshQueue]
+    [materialize, refreshQueue]
   );
 
   const removeFromQueue = useCallback(
-    async (index: number) => {
+    (index: number) => {
       if (!ensurePlayerReady()) {
         return;
       }
+      materialize();
       TrackPlayer.removeMediaItem(index);
       refreshQueue();
     },
-    [refreshQueue]
+    [materialize, refreshQueue]
   );
 
   const moveInQueue = useCallback(
-    async (fromIndex: number, toIndex: number) => {
+    (fromIndex: number, toIndex: number) => {
       if (!ensurePlayerReady()) {
         return;
       }
+      materialize();
       TrackPlayer.moveMediaItem(fromIndex, toIndex);
       refreshQueue();
     },
-    [refreshQueue]
+    [materialize, refreshQueue]
   );
 
-  const skipToIndex = useCallback(
-    async (index: number) => {
-      if (!ensurePlayerReady()) {
-        return;
-      }
-      TrackPlayer.skipToIndex(index);
-      TrackPlayer.play();
-      refreshQueue();
-    },
-    [refreshQueue]
-  );
-
-  const clearQueue = useCallback(async () => {
+  const clearQueue = useCallback(() => {
     if (!ensurePlayerReady()) {
       return;
     }
+    materialize();
     const length = TrackPlayer.getQueue().length;
     if (length === 0) {
       return;
@@ -426,7 +575,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       }
     }
     refreshQueue();
-  }, [refreshQueue]);
+  }, [materialize, refreshQueue]);
 
   const actions = useMemo<PlayerActions & QueueActions>(
     () => ({

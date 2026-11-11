@@ -1,18 +1,16 @@
 import { useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { type Href } from 'expo-router';
 import { useRouter } from '@/lib/useRouter';
 
 import { colors, radii, spacing, typography } from '@/theme';
 import { Icon, type IconName } from '@/components/Icon';
-import { MenuButton } from '@/components/MenuButton';
+import { DetailTopBar } from '@/components/DetailScreen';
 import { showToast } from '@/components/Toast';
-import { tapLight, tapMedium } from '@/lib/haptics';
+import { tapMedium } from '@/lib/haptics';
 import { useAuth } from '@/auth/AuthProvider';
 import { useLibrary } from '@/library/LibraryProvider';
 import { coverCacheSize } from '@/library/trackTags';
-import { isIncognitoEnabled, setIncognitoEnabled } from '@/player/playRecorder';
 import { clearResumePoint } from '@/player/resumeState';
 import { useSync } from '@/sync/SyncProvider';
 
@@ -37,9 +35,11 @@ function formatSyncedAt(ms: number): string {
   return sameDay ? `Synchronisé à ${time}` : `Synchronisé le ${date.toLocaleDateString('fr-FR')}`;
 }
 
-/** Onglet Réglages. */
+/**
+ * Réglages, ouverts par l'engrenage des en-têtes : synchronisation, dossiers scannés, lecture,
+ * cache et compte.
+ */
 export default function SettingsScreen() {
-  const insets = useSafeAreaInsets();
   const router = useRouter();
   const { folders, excludedTracks, clearCache } = useLibrary();
   const { signOut } = useAuth();
@@ -48,15 +48,6 @@ export default function SettingsScreen() {
   // Taille du cache pochettes lue une fois au montage (initialiseur paresseux, pas de re-scan).
   const [cacheSize, setCacheSize] = useState(() => coverCacheSize());
   const [clearing, setClearing] = useState(false);
-
-  // « Écoute privée » (déplacée de l'onglet Écoutes — c'est un réglage de confidentialité, pas
-  // une statistique) : suspend l'enregistrement de l'historique d'écoute.
-  const [incognito, setIncognito] = useState(() => isIncognitoEnabled());
-  const toggleIncognito = (next: boolean) => {
-    tapLight();
-    setIncognito(next);
-    setIncognitoEnabled(next);
-  };
 
   const cacheHint = clearing
     ? 'Nettoyage en cours…'
@@ -67,7 +58,7 @@ export default function SettingsScreen() {
   const confirmClearCache = () => {
     Alert.alert(
       'Vider le cache',
-      'Supprime les pochettes et les métadonnées mises en cache, puis re-scanne la bibliothèque. Tes playlists, favoris et corrections sont conservés.',
+      'Supprime les pochettes et les tags mis en cache, puis relit tous les fichiers. Tes playlists, favoris et écoutes sont conservés.',
       [
         { text: 'Annuler', style: 'cancel' },
         {
@@ -124,12 +115,6 @@ export default function SettingsScreen() {
       href: '/library-settings',
     },
     {
-      icon: 'edit_note',
-      label: 'Métadonnées & fichiers',
-      hint: 'Tags, artistes, albums, nettoyage des titres',
-      href: '/file-editing',
-    },
-    {
       icon: 'queue_music',
       label: 'Lecture',
       hint: 'Répétition, lecture aléatoire',
@@ -156,13 +141,11 @@ export default function SettingsScreen() {
 
   return (
     <View style={styles.screen}>
+      <DetailTopBar />
       <ScrollView
-        contentContainerStyle={{ paddingTop: insets.top + spacing.md }}
+        contentContainerStyle={{ paddingBottom: spacing.xxl }}
         showsVerticalScrollIndicator={false}
       >
-        <View style={{ paddingLeft: spacing.xxl, paddingTop: spacing.xs }}>
-          <MenuButton />
-        </View>
         <Text style={styles.title}>Réglages</Text>
 
         <View style={styles.list}>
@@ -216,31 +199,6 @@ export default function SettingsScreen() {
               {row.href && <Icon name="chevron_right" size={22} color={colors.textMuted} />}
             </Pressable>
           ))}
-        </View>
-
-        {/* Confidentialité. */}
-        <View style={styles.list}>
-          <View style={styles.row}>
-            <Icon
-              name="visibility_off"
-              size={24}
-              color={incognito ? colors.accent : colors.accentIcon}
-            />
-            <View style={styles.rowText}>
-              <Text style={styles.rowLabel}>Écoute privée</Text>
-              <Text style={styles.rowHint}>
-                {incognito
-                  ? 'Actif — les écoutes ne sont pas enregistrées'
-                  : 'Suspend l’enregistrement de l’historique'}
-              </Text>
-            </View>
-            <Switch
-              value={incognito}
-              onValueChange={toggleIncognito}
-              trackColor={{ false: colors.borderStrong, true: colors.accent }}
-              thumbColor={colors.textPrimary}
-            />
-          </View>
         </View>
 
         <View style={styles.list}>

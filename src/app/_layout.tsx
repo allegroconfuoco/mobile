@@ -18,6 +18,7 @@ import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { colors } from '@/theme';
@@ -26,7 +27,6 @@ import { subscribePlaybackError } from '@/player/playbackErrors';
 import { AuthProvider, useAuth } from '@/auth/AuthProvider';
 import { PlayerProvider } from '@/player/PlayerProvider';
 import { LibraryProvider } from '@/library/LibraryProvider';
-import { EnrichmentRunner } from '@/library/EnrichmentRunner';
 import { PlaylistsProvider } from '@/library/PlaylistsProvider';
 import { FavoritesProvider } from '@/library/FavoritesProvider';
 import { SyncProvider } from '@/sync/SyncProvider';
@@ -55,26 +55,27 @@ export default function RootLayout() {
   });
 
   return (
-    <SafeAreaProvider>
-      <StatusBar style="light" />
-      <AuthProvider>
-        <LibraryProvider>
-          {/* Enrichissement MusicBrainz de fond (issue #19) : lit useAuth + useLibrary, sans UI. */}
-          <EnrichmentRunner />
-          <PlaylistsProvider>
-            <FavoritesProvider>
-              <SyncProvider>
-                <PlayerProvider>
-                  <RootNavigator fontsReady={loaded || error != null} />
-                  {/* Host racine du toast (les modaux natifs montent le leur, cf. Toast.tsx). */}
-                  <ToastHost />
-                </PlayerProvider>
-              </SyncProvider>
-            </FavoritesProvider>
-          </PlaylistsProvider>
-        </LibraryProvider>
-      </AuthProvider>
-    </SafeAreaProvider>
+    // Racine des gestes (carrousel, glissements, feuilles) : tout l'arbre doit être dessous.
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: colors.background }}>
+      <SafeAreaProvider>
+        <StatusBar style="light" />
+        <AuthProvider>
+          <LibraryProvider>
+            <PlaylistsProvider>
+              <FavoritesProvider>
+                <SyncProvider>
+                  <PlayerProvider>
+                    <RootNavigator fontsReady={loaded || error != null} />
+                    {/* Host racine du toast (les modaux natifs montent le leur, cf. Toast.tsx). */}
+                    <ToastHost />
+                  </PlayerProvider>
+                </SyncProvider>
+              </FavoritesProvider>
+            </PlaylistsProvider>
+          </LibraryProvider>
+        </AuthProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 
@@ -119,16 +120,25 @@ function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
           contentStyle: { backgroundColor: colors.background },
         }}
       >
-        {/* Écrans accessibles une fois connecté. Toutes les listes et les écrans de détail (artiste,
-            album, playlist, favoris, réglages…) vivent dans le Stack unique de `(app)`, sous le
-            mini-player persistant + le menu latéral. Seuls restent au niveau racine les modaux, qui
-            doivent couvrir toute l'UI, chrome bas compris. */}
+        {/* Écrans accessibles une fois connecté. Les onglets et les écrans de détail vivent dans le
+            Stack de `(app)`, au-dessus du mini-lecteur et de la barre d'onglets. Seuls restent au
+            niveau racine les écrans qui couvrent toute l'interface, chrome bas compris. */}
         <Stack.Protected guard={isAuthenticated}>
           <Stack.Screen name="(app)" />
-          {/* Écran Lecture présenté en modal, au-dessus de la tab bar. */}
-          <Stack.Screen name="now-playing" options={{ presentation: 'modal' }} />
-          {/* File d'attente, également en modal. */}
-          <Stack.Screen name="queue" options={{ presentation: 'modal' }} />
+          {/* Lecture : monte du bas par-dessus l'app, qui reste rendue derrière — c'est elle qu'on
+              voit réapparaître quand on fait glisser l'écran vers le bas pour le fermer. */}
+          <Stack.Screen
+            name="now-playing"
+            options={{
+              presentation: 'transparentModal',
+              animation: 'slide_from_bottom',
+              contentStyle: { backgroundColor: 'transparent' },
+            }}
+          />
+          <Stack.Screen
+            name="queue"
+            options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+          />
         </Stack.Protected>
 
         {/* Porte d'entrée quand la session est absente. */}

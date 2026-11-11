@@ -1,55 +1,50 @@
-import { Asset } from 'expo-media-library';
 import type { MediaItem } from '@rntp/player';
 
 import { type LocalTrack } from '@/library/useAudioLibrary';
-import { peekTrackTags, readTrackTags } from '@/library/trackTags';
 
 /**
- * Convertit une piste de la bibliothèque locale en `MediaItem` @rntp/player.
+ * Convertit une piste de la bibliothèque locale en `MediaItem` @rntp/player — **sans aucune IO**.
  *
- * Deux résolutions à la demande :
- * - l'URI réelle du fichier (`Asset.getUri()` → `file://` sur Android), que le scan ne
- *   garde pas en mémoire pour ne pas la résoudre pour des milliers de titres jamais lus ;
- * - les tags ID3 (titre/artiste/album/pochette), déjà en cache s'ils ont été lus par la
- *   liste, sinon lus ici pour que la notification média affiche des métadonnées correctes.
+ * Tout ce dont le lecteur a besoin est déjà en mémoire : le scan a résolu l'URI `file://` du
+ * fichier et lu ses tags, le tout persisté en base puis rechargé au démarrage. Construire la file
+ * est donc une simple projection synchrone.
+ *
+ * C'était le principal frein au « tap → son » : la version précédente résolvait l'URI de **chaque**
+ * piste de la file (`Asset.getUri()`, un aller-retour natif par titre) avant de lancer quoi que ce
+ * soit. Taper un morceau dans une bibliothèque de 2 000 titres attendait 2 000 résolutions.
  *
  * `mediaId` = id du media store : il sert à retrouver quelle `LocalTrack` joue à partir du
  * snapshot de file (`useQueue`) — identité stable, indépendante de l'ordre.
  */
-export async function toPlayerTrack(local: LocalTrack): Promise<MediaItem> {
-  const url = await new Asset(local.id).getUri();
-  const tags = peekTrackTags(local.id) ?? (await readTrackTags(local.id));
-
+export function toMediaItem(local: LocalTrack): MediaItem | null {
+  // Repli sur l'id quand le scan n'a pas pu résoudre le chemin : sur Android c'est l'URI
+  // `content://` du media store, que le lecteur sait ouvrir directement.
+  const url = local.uri ?? (local.id.startsWith('content://') ? local.id : null);
+  if (!url) {
+    return null;
+  }
   return {
     mediaId: local.id,
     url,
-    title: tags?.title ?? local.title,
-    artist: tags?.artist ?? 'Artiste inconnu',
-    // Repli sur l'enrichissement MusicBrainz (issue #19) : album et pochette distante quand le
-    // fichier n'embarque ni tag album ni pochette (artworkUrl accepte une URL distante).
-    albumTitle: tags?.album ?? local.album ?? undefined,
-    artworkUrl: tags?.artworkUri ?? local.coverArtUrl ?? undefined,
+    title: local.title,
+    artist: local.artist ?? 'Artiste inconnu',
+    albumTitle: local.album ?? undefined,
+    artworkUrl: local.artworkUri ?? undefined,
     duration: local.durationMs != null ? local.durationMs / 1000 : undefined,
   };
 }
 
 /**
- * Résout une liste de pistes locales en `MediaItem[]`.
- *
- * Les résolutions sont faites en parallèle ; toute piste dont l'URI est introuvable est
- * ignorée (et journalisée) plutôt que de faire échouer l'ensemble. On garde donc une file
- * cohérente même si un fichier a disparu entre le scan et la lecture.
+ * Projette une liste de pistes locales en `MediaItem[]`. Une piste sans URI exploitable est
+ * simplement omise : la file reste cohérente même si un fichier est illisible.
  */
-export async function resolvePlayerTracks(locals: LocalTrack[]): Promise<MediaItem[]> {
-  const resolved = await Promise.all(
-    locals.map(async (local) => {
-      try {
-        return await toPlayerTrack(local);
-      } catch (e) {
-        console.warn('[player] URI introuvable, piste ignorée', local.filename, e);
-        return null;
-      }
-    })
-  );
-  return resolved.filter((track): track is MediaItem => track !== null);
+export function toMediaItems(locals: LocalTrack[]): MediaItem[] {
+  const items: MediaItem[] = [];
+  for (const local of locals) {
+    const item = toMediaItem(local);
+    if (item) {
+      items.push(item);
+    }
+  }
+  return items;
 }

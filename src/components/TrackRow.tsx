@@ -1,9 +1,12 @@
 import { memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import Animated, { useAnimatedStyle, ZoomIn } from 'react-native-reanimated';
 
 import { colors, radii, spacing, typography } from '@/theme';
+import { EqualizerBars } from '@/components/EqualizerBars';
 import { Icon } from '@/components/Icon';
 import { TrackCover } from '@/components/TrackCover';
+import { SPRING_BOUNCY, useSpringFlag } from '@/lib/motion';
 import type { LocalTrack } from '@/library/useAudioLibrary';
 
 /**
@@ -41,7 +44,7 @@ type TrackRowProps = {
   /** Sous-titre custom ; par défaut « artiste · album ». */
   subtitle?: string;
   /**
-   * Mode sélection multiple : le slot de droite cède la place à une checkbox et le tap
+   * Mode sélection multiple : le slot de droite cède la place à une case à cocher et le tap
    * coche/décoche (le handler `onPress` fourni par l'appelant porte alors la bascule). Props
    * primitives pour préserver le `memo` ; la hauteur (`TRACK_ROW_HEIGHT`) ne change pas.
    */
@@ -49,24 +52,18 @@ type TrackRowProps = {
   /** Piste cochée (mode sélection). */
   selected?: boolean;
   /**
-   * Bouton d'action rapide dans le slot de droite. Non fourni = pas de bouton (file d'attente,
-   * listes réordonnables). Tap : ajoute aux favoris si la piste n'y est pas, sinon ouvre le
-   * sélecteur de playlists. Appui long : retire des favoris. Deux gestes courants qui coûtaient
-   * chacun un appui long + une feuille.
+   * Bouton « + » du slot de droite : ouvre directement le sélecteur de playlists (Favoris en
+   * tête). Non fourni = pas de bouton (listes réordonnables).
    */
-  onQuickAction?: () => void;
-  onQuickActionLongPress?: () => void;
-  /** État favori, qui pilote l'icône du bouton d'action rapide. */
-  isFavorite?: boolean;
+  onAdd?: () => void;
 };
 
 /**
- * Ligne de piste réutilisable (bibliothèque, détail artiste, détail album).
+ * Ligne de piste réutilisable (Morceaux, artiste, album, favoris, recherche).
  *
- * Les tags (titre / artiste / album / pochette) sont lus directement depuis `LocalTrack` :
- * ils sont désormais persistés au scan (cf. `useAudioLibrary`), plus besoin de lecture
- * paresseuse par ligne. Mémoïsée : dans une liste de plusieurs milliers de titres, seules les
- * lignes dont les props changent (piste active, données rafraîchies) doivent re-rendre.
+ * Les tags (titre / artiste / album / pochette) sont lus directement depuis `LocalTrack`,
+ * persistés au scan. Mémoïsée : dans une liste de plusieurs milliers de titres, seules les lignes
+ * dont les props changent (piste active, coche) doivent re-rendre.
  */
 export const TrackRow = memo(function TrackRow({
   track,
@@ -77,13 +74,11 @@ export const TrackRow = memo(function TrackRow({
   subtitle,
   selectionMode = false,
   selected = false,
-  onQuickAction,
-  onQuickActionLongPress,
-  isFavorite = false,
+  onAdd,
 }: TrackRowProps) {
-  // La durée vit dans le sous-titre : le slot de droite est désormais actionnable, et « 3:42 »
-  // se lit très bien en fin de ligne méta. Un `subtitle=""` explicite (vue artiste, où l'album est
-  // déjà dans l'en-tête de section) ne doit pas laisser de séparateur orphelin.
+  // La durée vit dans le sous-titre : le slot de droite est actionnable, et « 3:42 » se lit très
+  // bien en fin de ligne méta. Un `subtitle=""` explicite (vue artiste, où l'album est déjà dans
+  // l'en-tête de section) ne doit pas laisser de séparateur orphelin.
   const meta = [subtitle ?? defaultSubtitle(track), formatDuration(track.durationMs)]
     .filter((part) => part.length > 0)
     .join(' · ');
@@ -93,7 +88,7 @@ export const TrackRow = memo(function TrackRow({
     <Pressable
       onPress={onPress}
       onLongPress={selectionMode ? undefined : onLongPress}
-      delayLongPress={300}
+      delayLongPress={280}
       // Ripple natif : feedback dès le touch-down (zéro JS), en plus du fond `pressed`.
       android_ripple={{ color: colors.borderStrong }}
       style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
@@ -103,22 +98,22 @@ export const TrackRow = memo(function TrackRow({
       }
       accessibilityLabel={selectionMode ? track.title : `Lire ${track.title}`}
       accessibilityHint={
-        onLongPress && !selectionMode ? 'Appui long pour ajouter à la file' : undefined
+        onLongPress && !selectionMode ? 'Appui long pour sélectionner plusieurs titres' : undefined
       }
     >
       {showNumber ? (
         <View style={styles.numberBox}>
-          {isActive ? (
-            <Icon name="graphic_eq" size={18} color={colors.accentIcon} />
-          ) : (
-            <Text style={styles.number}>{leadingNumber ?? '·'}</Text>
-          )}
+          {isActive ? <EqualizerBars /> : <Text style={styles.number}>{leadingNumber ?? '·'}</Text>}
         </View>
       ) : (
-        <TrackCover
-          uri={track.artworkUri ?? track.coverArtUrl}
-          seed={`${track.title}${track.artist ?? ''}`}
-        />
+        <View>
+          <TrackCover uri={track.artworkUri} seed={`${track.title}${track.artist ?? ''}`} />
+          {isActive && (
+            <View style={styles.coverOverlay}>
+              <EqualizerBars color={colors.textPrimary} />
+            </View>
+          )}
+        </View>
       )}
       <View style={styles.text}>
         <Text style={[styles.title, isActive && styles.titleActive]} numberOfLines={1}>
@@ -131,38 +126,41 @@ export const TrackRow = memo(function TrackRow({
         )}
       </View>
       {selectionMode ? (
-        <View style={[styles.checkbox, selected && styles.checkboxOn]}>
-          {selected && <Icon name="check" size={16} color={colors.onAccent} />}
-        </View>
-      ) : onQuickAction ? (
+        <SelectionCheck selected={selected} />
+      ) : onAdd ? (
         <Pressable
-          onPress={onQuickAction}
-          onLongPress={onQuickActionLongPress}
-          delayLongPress={300}
+          onPress={onAdd}
           hitSlop={6}
           android_ripple={{ color: colors.borderStrong, borderless: true, radius: 22 }}
-          style={styles.quickAction}
+          style={styles.addButton}
           accessibilityRole="button"
-          accessibilityLabel={
-            isFavorite
-              ? `Ajouter ${track.title} à une playlist`
-              : `Ajouter ${track.title} aux favoris`
-          }
-          accessibilityHint={isFavorite ? 'Appui long pour retirer des favoris' : undefined}
+          accessibilityLabel={`Ajouter ${track.title} à une playlist`}
         >
-          <Icon
-            name={isFavorite ? 'favorite' : 'add'}
-            filled={isFavorite}
-            size={22}
-            color={isFavorite ? colors.accent : colors.textMuted}
-          />
+          <Icon name="add" size={24} color={colors.textSecondary} />
         </Pressable>
-      ) : isActive && !showNumber ? (
-        <Icon name="graphic_eq" size={20} color={colors.accentIcon} />
       ) : null}
     </Pressable>
   );
 });
+
+/**
+ * Case à cocher du mode sélection : entre avec un léger rebond quand le mode s'ouvre, et la coche
+ * « pose » quand on sélectionne la ligne.
+ */
+export function SelectionCheck({ selected }: { selected: boolean }) {
+  const on = useSpringFlag(selected, SPRING_BOUNCY);
+  const fill = useAnimatedStyle(() => ({
+    opacity: Math.min(1, on.get() * 1.5),
+    transform: [{ scale: 0.4 + 0.6 * on.get() }],
+  }));
+  return (
+    <Animated.View entering={ZoomIn.springify().damping(18).stiffness(320)} style={styles.checkbox}>
+      <Animated.View style={[styles.checkboxFill, fill]}>
+        <Icon name="check" size={16} color={colors.onAccent} />
+      </Animated.View>
+    </Animated.View>
+  );
+}
 
 type TrackIndexRowProps = {
   track: LocalTrack;
@@ -177,10 +175,8 @@ type TrackIndexRowProps = {
   selectionMode?: boolean;
   selected?: boolean;
   onToggleSelect?: (track: LocalTrack) => void;
-  /** Bouton d'action rapide du slot de droite (cf. `TrackRowProps.onQuickAction`). */
-  onQuickAction?: (track: LocalTrack) => void;
-  onQuickActionLongPress?: (track: LocalTrack) => void;
-  isFavorite?: boolean;
+  /** Bouton « + » du slot de droite (cf. `TrackRowProps.onAdd`). */
+  onAdd?: (track: LocalTrack) => void;
 };
 
 /**
@@ -199,9 +195,7 @@ export const TrackIndexRow = memo(function TrackIndexRow({
   selectionMode = false,
   selected = false,
   onToggleSelect,
-  onQuickAction,
-  onQuickActionLongPress,
-  isFavorite = false,
+  onAdd,
 }: TrackIndexRowProps) {
   return (
     <TrackRow
@@ -213,11 +207,7 @@ export const TrackIndexRow = memo(function TrackIndexRow({
       subtitle={subtitle}
       selectionMode={selectionMode}
       selected={selected}
-      onQuickAction={onQuickAction ? () => onQuickAction(track) : undefined}
-      onQuickActionLongPress={
-        onQuickActionLongPress ? () => onQuickActionLongPress(track) : undefined
-      }
-      isFavorite={isFavorite}
+      onAdd={onAdd ? () => onAdd(track) : undefined}
     />
   );
 });
@@ -264,8 +254,20 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginTop: 2,
   },
+  // Voile sombre sur la pochette de la piste en cours, pour que les barres restent lisibles.
+  coverOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.sm,
+    backgroundColor: 'rgba(20,17,16,0.62)',
+  },
   // 44×44 : même gabarit tactile que la pochette, donc `TRACK_ROW_HEIGHT` est inchangée.
-  quickAction: {
+  addButton: {
     width: 44,
     height: 44,
     alignItems: 'center',
@@ -274,15 +276,17 @@ const styles = StyleSheet.create({
   checkbox: {
     width: 24,
     height: 24,
+    marginHorizontal: 10,
     borderRadius: radii.sm,
     borderWidth: 2,
     borderColor: colors.borderStrong,
+    overflow: 'hidden',
+  },
+  checkboxFill: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  checkboxOn: {
     backgroundColor: colors.accent,
-    borderColor: colors.accent,
   },
 });
 

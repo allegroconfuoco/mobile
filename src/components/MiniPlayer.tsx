@@ -1,230 +1,223 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter } from '@/lib/useRouter';
-import { Animated, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
-import { Image } from 'expo-image';
-import { LinearGradient } from 'expo-linear-gradient';
+import { useEffect, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, {
+  Easing,
+  FadeInDown,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
+import { useIsPlaying, type MediaItem } from '@rntp/player';
 
-import { colors, coverFallback, coverGradient, radii, spacing, typography } from '@/theme';
+import { colors, spacing, typography } from '@/theme';
+import { HeartButton } from '@/components/HeartButton';
 import { Icon } from '@/components/Icon';
+import { PlayPauseIcon } from '@/components/PlayPauseIcon';
+import { PlaylistPickerSheet } from '@/components/PlaylistPickerSheet';
 import { PressableScale } from '@/components/PressableScale';
-import { useIsPlaying, useProgress } from '@rntp/player';
-
-import { usePlayer } from '@/player/PlayerProvider';
-import { useActiveTrack } from '@/player/usePlayback';
-import { useLibrary } from '@/library/LibraryProvider';
-import { useFavorites } from '@/library/FavoritesProvider';
+import { CarouselPageView, useTrackCarousel } from '@/components/TrackCarousel';
+import { TrackCover } from '@/components/TrackCover';
 import { tapLight } from '@/lib/haptics';
+import { DURATION, EASE_OUT, SPRING_SNAPPY } from '@/lib/motion';
+import { useRouter } from '@/lib/useRouter';
+import { useLibrary } from '@/library/LibraryProvider';
+import type { LocalTrack } from '@/library/useAudioLibrary';
+import { usePlayer } from '@/player/PlayerProvider';
+import { useActiveTrack, usePlaybackProgress } from '@/player/usePlayback';
 
-// Seuils de geste (px). Au-delà, on déclenche l'action ; en-deçà, retour à la position de repos.
-const SWIPE_DISTANCE = 60; // horizontal → piste précédente / suivante
-const OPEN_DISTANCE = 36; // vertical vers le haut → ouvre la lecture
+/** Hauteur de la rangée du mini-lecteur (pochette 44 + marges), hors barre de progression. */
+const ROW_HEIGHT = 64;
+/** Déplacement vers le haut (px) qui ouvre l'écran Lecture. */
+const OPEN_DISTANCE = 28;
 
 /**
- * Mini-player persistant, posé au-dessus de la tab bar.
+ * Mini-lecteur persistant, posé au-dessus de la barre d'onglets.
  *
- * Se cache tant qu'aucune piste n'est chargée. Un tap sur la barre ouvre l'écran Lecture
- * (modal « now-playing ») ; le bouton play/pause, lui, pilote la lecture sans ouvrir le modal.
- * À l'apparition, la barre glisse depuis le bas (motion design, API Animated du cœur RN).
+ * - **Glisser à l'horizontale** change de piste : la pochette et le titre partent en entier sous
+ *   le doigt pendant que ceux de la piste voisine entrent à leur place (cf. `TrackCarousel`).
+ * - **Tap** ou **glisser vers le haut** ouvre l'écran Lecture ; **appui long** ouvre la file.
+ * - À droite, trois boutons qui ne bougent pas pendant le glissement : cœur, « + » (ajouter le
+ *   titre en cours à une playlist) et lecture / pause.
+ *
+ * Se cache tant qu'aucune piste n'est chargée. Au lancement, il affiche la dernière session
+ * d'écoute, à l'arrêt : un tap sur lecture la reprend là où elle s'était arrêtée.
  */
 export function MiniPlayer() {
   const router = useRouter();
-  // Pas de `usePlayback` ici : son `useProgress` re-rendrait toute la barre (titre, pochette,
-  // contrôles) 4×/s. La progression vit dans `MiniProgressBar`, seul composant qui sonde.
+  // Pas de `usePlayback` ici : son sondage de position re-rendrait toute la barre 4×/s. La
+  // progression vit dans `MiniProgressBar`, seul composant qui sonde.
   const track = useActiveTrack();
   const isPlaying = useIsPlaying();
-  const { togglePlayPause, skipToNext, skipToPrevious } = usePlayer();
-
-  // Like sur la piste active : résolution mediaId → piste locale (même motif que now-playing).
-  // Piste non résolue (fichier disparu) : le coeur est simplement masqué.
+  const { togglePlayPause } = usePlayer();
   const { tracksById } = useLibrary();
-  const { isFavorite, toggleFavorite } = useFavorites();
+  const carousel = useTrackCarousel();
+
+  // Piste locale correspondant à la piste active (cœur et « + ») ; absente si le fichier a disparu.
   const local = track?.mediaId ? (tracksById.get(track.mediaId) ?? null) : null;
-  const liked = local ? isFavorite(local.id) : false;
+  const [pickerTrack, setPickerTrack] = useState<LocalTrack | null>(null);
 
-  // Entrée : montée + fondu au montage (quand une première piste devient disponible).
-  const [enter] = useState(() => new Animated.Value(0));
-  useEffect(() => {
-    Animated.spring(enter, {
-      toValue: 1,
-      useNativeDriver: true,
-      speed: 16,
-      bounciness: 6,
-    }).start();
-  }, [enter]);
+  const openPlayer = () => router.push('/now-playing');
+  const openQueue = () => {
+    tapLight();
+    router.push('/queue');
+  };
 
-  // Décalage horizontal suivi pendant un glissement latéral (retour visuel : la barre suit le doigt).
-  const [swipeX] = useState(() => new Animated.Value(0));
-
-  // Le PanResponder n'est créé qu'une fois ; les actions (stables) sont lues via une ref pour
-  // éviter toute closure périmée sans recréer le responder. `PanResponder` du cœur RN (pas de
-  // gesture-handler, cf. CLAUDE.md).
-  const actionsRef = useRef({
-    skipToNext,
-    skipToPrevious,
-    openPlayer: () => router.push('/now-playing'),
-  });
-  useEffect(() => {
-    actionsRef.current = {
-      skipToNext,
-      skipToPrevious,
-      openPlayer: () => router.push('/now-playing'),
-    };
-  });
-
-  // Un tap ouvre la lecture ; un glissement pilote la navigation entre pistes / l'ouverture.
-  // On ne capte le geste (et n'annule le tap) qu'au-delà d'un petit seuil de mouvement, pour
-  // laisser le tap et le bouton play/pause fonctionner normalement.
-  /* eslint-disable react-hooks/refs */
-  const swipeResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 8 || Math.abs(g.dy) > 8,
-        onPanResponderMove: (_e, g) => {
-          // Retour visuel uniquement pour l'horizontal (amorti), le vertical reste discret.
-          if (Math.abs(g.dx) > Math.abs(g.dy)) {
-            swipeX.setValue(g.dx * 0.4);
-          }
-        },
-        onPanResponderRelease: (_e, g) => {
-          const horizontal = Math.abs(g.dx) > Math.abs(g.dy);
-          if (horizontal && g.dx <= -SWIPE_DISTANCE) {
-            tapLight();
-            actionsRef.current.skipToNext();
-          } else if (horizontal && g.dx >= SWIPE_DISTANCE) {
-            tapLight();
-            actionsRef.current.skipToPrevious();
-          } else if (!horizontal && g.dy <= -OPEN_DISTANCE) {
-            actionsRef.current.openPlayer();
-          }
-          Animated.spring(swipeX, {
-            toValue: 0,
-            useNativeDriver: true,
-            speed: 20,
-            bounciness: 8,
-          }).start();
-        },
-        onPanResponderTerminate: () => {
-          Animated.spring(swipeX, {
-            toValue: 0,
-            useNativeDriver: true,
-            speed: 20,
-            bounciness: 8,
-          }).start();
-        },
-      }),
-    [swipeX]
-  );
-  /* eslint-enable react-hooks/refs */
+  // Glisser vers le haut : la barre se soulève sous le doigt, puis l'écran Lecture s'ouvre.
+  const lift = useSharedValue(0);
+  const open = Gesture.Pan()
+    .activeOffsetY(-12)
+    .failOffsetY(12)
+    .failOffsetX([-14, 14])
+    .onChange((e) => {
+      lift.set(Math.max(-OPEN_DISTANCE, Math.min(0, e.translationY * 0.5)));
+    })
+    .onEnd((e) => {
+      if (e.translationY < -OPEN_DISTANCE || e.velocityY < -600) {
+        scheduleOnRN(openPlayer);
+      }
+    })
+    .onFinalize(() => {
+      lift.set(withSpring(0, SPRING_SNAPPY));
+    });
+  const gestures = Gesture.Race(carousel.gesture, open);
+  const liftStyle = useAnimatedStyle(() => ({ transform: [{ translateY: lift.get() }] }));
 
   // Rien à afficher tant que la file est vide. (Hooks appelés avant ce retour : règles respectées.)
   if (!track) {
     return null;
   }
 
-  const title = track.title ?? 'Titre inconnu';
-  const artist = track.artist ?? 'Artiste inconnu';
-
   return (
-    <Animated.View
-      {...swipeResponder.panHandlers}
-      style={{
-        opacity: enter,
-        transform: [
-          { translateY: enter.interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) },
-          { translateX: swipeX },
-        ],
-      }}
-    >
-      <Pressable
-        onPress={() => router.push('/now-playing')}
-        // Appui long = file d'attente (le tap et les swipes sont déjà pris) : la file devient
-        // accessible sans passer par l'écran Lecture.
-        onLongPress={() => {
-          tapLight();
-          router.push('/queue');
-        }}
-        delayLongPress={300}
-        style={styles.container}
-        accessibilityRole="button"
-        accessibilityLabel={`Ouvrir la lecture en cours : ${title}, ${artist}. Glissez horizontalement pour changer de piste, vers le haut pour ouvrir la lecture. Appui long pour la file d'attente.`}
-      >
+    <Animated.View entering={FadeInDown.duration(DURATION.slow).easing(EASE_OUT)}>
+      <Animated.View style={[styles.container, liftStyle]}>
         <MiniProgressBar />
 
         <View style={styles.row}>
-          <Cover
-            uri={typeof track.artworkUrl === 'string' ? track.artworkUrl : null}
-            seed={`${title}${artist}`}
-          />
-          <View style={styles.meta}>
-            <Text style={styles.title} numberOfLines={1}>
-              {title}
-            </Text>
-            <Text style={styles.artist} numberOfLines={1}>
-              {artist}
-            </Text>
-          </View>
+          <GestureDetector gesture={gestures}>
+            <View style={styles.carousel} onLayout={carousel.onLayout}>
+              {carousel.pages.map((page) => (
+                <CarouselPageView key={page.slot} slot={page.slot} carousel={carousel}>
+                  <TrackPage
+                    item={page.item}
+                    // Seule la page courante est interactive et lue par le lecteur d'écran.
+                    interactive={page.current}
+                    onPress={openPlayer}
+                    onLongPress={openQueue}
+                  />
+                </CarouselPageView>
+              ))}
+            </View>
+          </GestureDetector>
+
+          {local && <HeartButton trackId={local.id} style={styles.button} toast />}
           {local && (
-            <PressableScale
+            <Pressable
               onPress={() => {
                 tapLight();
-                toggleFavorite(local.id, local.mbid);
+                setPickerTrack(local);
               }}
-              style={styles.likeHit}
+              hitSlop={4}
+              android_ripple={{ color: colors.borderStrong, borderless: true, radius: 20 }}
+              style={styles.button}
               accessibilityRole="button"
-              accessibilityLabel={liked ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+              accessibilityLabel="Ajouter le titre en cours à une playlist"
             >
-              <Icon
-                name={liked ? 'favorite' : 'favorite_border'}
-                filled={liked}
-                size={22}
-                color={liked ? colors.accent : colors.textSecondary}
-              />
-            </PressableScale>
+              <Icon name="add" size={24} color={colors.textSecondary} />
+            </Pressable>
           )}
           <PressableScale
             onPress={() => {
               tapLight();
-              void togglePlayPause();
+              togglePlayPause();
             }}
-            style={styles.playHit}
+            hitSlop={4}
+            style={styles.playButton}
             accessibilityRole="button"
             accessibilityLabel={isPlaying ? 'Mettre en pause' : 'Lire'}
           >
-            <Icon name={isPlaying ? 'pause' : 'play_arrow'} size={30} color={colors.accentIcon} />
+            <PlayPauseIcon playing={isPlaying} size={30} color={colors.accentIcon} />
           </PressableScale>
         </View>
-      </Pressable>
+      </Animated.View>
+
+      <PlaylistPickerSheet
+        tracks={pickerTrack ? [pickerTrack] : null}
+        onClose={() => setPickerTrack(null)}
+      />
     </Animated.View>
   );
 }
 
-/**
- * Barre de progression fine (Forge : à plat, pleine largeur), isolée : seul composant du
- * mini-player à sonder la position (`useProgress` re-rend à chaque tick de 250 ms, même en pause).
- */
-function MiniProgressBar() {
-  const { position, duration } = useProgress(0.25);
-  const progress = duration > 0 ? Math.min(1, position / duration) : 0;
-
+/** Contenu d'une page du carrousel : pochette, titre, artiste. */
+function TrackPage({
+  item,
+  interactive,
+  onPress,
+  onLongPress,
+}: {
+  item: MediaItem;
+  interactive: boolean;
+  onPress: () => void;
+  onLongPress: () => void;
+}) {
+  const title = item.title ?? 'Titre inconnu';
+  const artist = item.artist ?? 'Artiste inconnu';
   return (
-    <View style={styles.progressTrack}>
-      <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
-    </View>
+    <Pressable
+      onPress={interactive ? onPress : undefined}
+      onLongPress={interactive ? onLongPress : undefined}
+      delayLongPress={300}
+      style={styles.page}
+      accessible={interactive}
+      importantForAccessibility={interactive ? 'yes' : 'no-hide-descendants'}
+      accessibilityRole="button"
+      accessibilityLabel={`Ouvrir la lecture en cours : ${title}, ${artist}`}
+      accessibilityHint="Glissez à l'horizontale pour changer de piste. Appui long pour la file d'attente."
+    >
+      <TrackCover
+        uri={typeof item.artworkUrl === 'string' ? item.artworkUrl : null}
+        seed={`${title}${typeof item.artist === 'string' ? item.artist : ''}`}
+      />
+      <View style={styles.meta}>
+        <Text style={styles.title} numberOfLines={1}>
+          {title}
+        </Text>
+        <Text style={styles.artist} numberOfLines={1}>
+          {artist}
+        </Text>
+      </View>
+    </Pressable>
   );
 }
 
-/** Pochette du mini-player : image du tag, ou dégradé de repli déterministe. */
-function Cover({ uri, seed }: { uri: string | null; seed: string }) {
-  if (uri) {
-    return <Image source={{ uri }} style={styles.cover} contentFit="cover" accessible={false} />;
-  }
+/**
+ * Barre de progression fine, isolée : seul composant du mini-lecteur à sonder la position. Le
+ * remplissage est une mise à l'échelle animée d'un tick au suivant, donc il avance en continu
+ * au lieu de sauter deux fois par seconde.
+ */
+function MiniProgressBar() {
+  const { position, duration } = usePlaybackProgress(0.5);
+  const ratio = duration > 0 ? Math.min(1, position / duration) : 0;
+  const progress = useSharedValue(ratio);
+
+  useEffect(() => {
+    // Un grand écart (changement de piste, seek) se rattrape vite ; l'avancée normale est lissée
+    // sur la durée d'un tick, à vitesse constante.
+    const jump = Math.abs(ratio - progress.get()) > 0.02;
+    progress.set(
+      withTiming(ratio, jump ? { duration: 160 } : { duration: 500, easing: Easing.linear })
+    );
+  }, [ratio, progress]);
+
+  const fillStyle = useAnimatedStyle(() => ({ transform: [{ scaleX: progress.get() }] }));
+
   return (
-    <LinearGradient
-      colors={coverGradient(seed) as [string, string]}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={styles.cover}
-    />
+    <View style={styles.progressTrack}>
+      <Animated.View style={[styles.progressFill, fillStyle]} />
+    </View>
   );
 }
 
@@ -233,12 +226,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderTopWidth: 1,
     borderTopColor: colors.border,
-    // Élévation : le mini-player se détache de la tab bar / du contenu derrière.
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -3 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 12,
   },
   progressTrack: {
     height: 2,
@@ -247,19 +234,27 @@ const styles = StyleSheet.create({
   progressFill: {
     height: 2,
     backgroundColor: colors.accent,
+    transformOrigin: 'left',
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.md,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: 11,
+    height: ROW_HEIGHT,
+    paddingRight: spacing.md,
   },
-  cover: {
-    width: 44,
-    height: 44,
-    borderRadius: radii.sm,
-    backgroundColor: coverFallback,
+  // Fenêtre du carrousel : borne les pages et masque celles des pistes voisines.
+  carousel: {
+    flex: 1,
+    height: ROW_HEIGHT,
+    overflow: 'hidden',
+  },
+  page: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingLeft: spacing.lg,
+    paddingRight: spacing.sm,
   },
   meta: {
     flex: 1,
@@ -272,14 +267,19 @@ const styles = StyleSheet.create({
   artist: {
     ...typography.body,
     fontSize: 11.5,
+    marginTop: 1,
   },
-  playHit: {
-    paddingVertical: spacing.sm,
-    paddingLeft: spacing.sm,
+  button: {
+    width: 40,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  likeHit: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.xs,
+  playButton: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
 

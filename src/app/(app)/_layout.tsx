@@ -1,49 +1,45 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect } from 'react';
 import { BackHandler, Platform, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, Stack } from 'expo-router';
 
 import { colors } from '@/theme';
 import { MiniPlayer } from '@/components/MiniPlayer';
-import { AppDrawer } from '@/components/AppDrawer';
-import { subscribeOpenDrawer } from '@/lib/drawer';
+import { TabBar } from '@/components/TabBar';
 import { reportBottomChromeHeight } from '@/lib/bottomChrome';
+import { getTab, setTab } from '@/lib/tabs';
 
-// Ancre de la pile : l'accueil (Dashboard) est le premier écran. Les détails (artiste, album,
-// playlist, réglages…) et les listes (Morceaux, Artistes…) se poussent au-dessus, sous le
-// mini-player persistant. Un deep link à froid monte donc l'accueil dessous → « retour » cohérent.
+// Ancre de la pile : l'écran des onglets est toujours dessous. Un écran de détail ouvert à froid
+// retrouve donc un « retour » cohérent.
 export const unstable_settings = { initialRouteName: 'index' };
 
 /**
- * Coquille de l'app (post-connexion) : un Stack unique et à plat (fini les onglets ; les trois
- * anciens groupes `(library)/(stats)/(settings)` n'ont plus de layout propre, leurs écrans sont
- * des frères de ce Stack), surmonté d'un mini-player persistant et du menu latéral (drawer).
+ * Coquille de l'app (post-connexion).
+ *
+ * Un **Stack unique et à plat** : sa racine (`index`) porte les quatre onglets comme de simples
+ * panneaux, et les écrans de détail (artiste, album, playlist, recherche, réglages…) se poussent
+ * par-dessus. Sous le Stack, un « chrome » bas **persistant** : le mini-lecteur puis la barre
+ * d'onglets, visibles partout — y compris sur les écrans de détail.
+ *
+ * Pas de navigateur à onglets, donc pas de piles imbriquées : le retour Android n'a qu'une pile à
+ * dépiler, et changer d'onglet ne monte ni ne démonte aucun écran.
  */
 export default function AppLayout() {
   const insets = useSafeAreaInsets();
-  const [drawerOpen, setDrawerOpen] = useState(false);
 
-  // Le hamburger (n'importe quel écran) demande l'ouverture via le store `openDrawer`.
-  useEffect(() => subscribeOpenDrawer(() => setDrawerOpen(true)), []);
-
-  // Bouton retour matériel Android. Priorité : fermer le drawer s'il est ouvert, sinon dépiler la
-  // pile (`router.back` reste le chemin fiable). Ref pour lire l'état courant sans réenregistrer
-  // le handler à chaque changement d'ouverture.
-  const drawerOpenRef = useRef(drawerOpen);
-  useEffect(() => {
-    drawerOpenRef.current = drawerOpen;
-  }, [drawerOpen]);
+  // Bouton retour matériel Android : dépiler l'écran de détail s'il y en a un ; sinon revenir au
+  // premier onglet ; sinon laisser le système quitter l'app.
   useEffect(() => {
     if (Platform.OS !== 'android') {
       return;
     }
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (drawerOpenRef.current) {
-        setDrawerOpen(false);
-        return true;
-      }
       if (router.canDismiss()) {
         router.back();
+        return true;
+      }
+      if (getTab() !== 'tracks') {
+        setTab('tracks');
         return true;
       }
       return false;
@@ -52,29 +48,28 @@ export default function AppLayout() {
   }, []);
 
   return (
-    <View style={{ flex: 1 }}>
-      <View style={{ flex: 1 }}>
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: colors.background },
-          }}
-        />
-        {/* Chrome bas persistant : le mini-player (masqué tant qu'aucune piste) posé au-dessus de
-            l'inset système. Sa hauteur mesurée positionne le toast (cf. bottomChrome). */}
-        <View
-          style={{ backgroundColor: colors.surfaceNav, paddingBottom: insets.bottom }}
-          onLayout={(e) => reportBottomChromeHeight(e.nativeEvent.layout.height)}
-        >
-          <MiniPlayer />
-        </View>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: colors.background },
+          // Un même mouvement pour tous les écrans de détail : ils arrivent par la droite et
+          // repartent par où ils sont venus.
+          animation: 'ios_from_right',
+        }}
+      >
+        <Stack.Screen name="index" />
+        {/* La recherche n'est pas « plus loin » dans une hiérarchie : elle se pose sur place. */}
+        <Stack.Screen name="(library)/search" options={{ animation: 'fade' }} />
+      </Stack>
+      {/* Chrome bas persistant. Sa hauteur mesurée positionne le toast (cf. bottomChrome). */}
+      <View
+        style={{ backgroundColor: colors.surfaceNav, paddingBottom: insets.bottom }}
+        onLayout={(e) => reportBottomChromeHeight(e.nativeEvent.layout.height)}
+      >
+        <MiniPlayer />
+        <TabBar />
       </View>
-
-      <AppDrawer
-        open={drawerOpen}
-        onOpen={() => setDrawerOpen(true)}
-        onClose={() => setDrawerOpen(false)}
-      />
     </View>
   );
 }

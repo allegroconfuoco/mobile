@@ -1,33 +1,41 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Animated, PanResponder, StyleSheet, Text, View } from 'react-native';
+import { type ReactNode } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, {
+  Extrapolation,
+  interpolate,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 
 import { colors, spacing, typography } from '@/theme';
 import { Icon, type IconName } from '@/components/Icon';
 import { TRACK_ROW_HEIGHT } from '@/components/TrackRow';
+import { selection as hapticSelection } from '@/lib/haptics';
+import { SPRING_SNAPPY } from '@/lib/motion';
 
 /**
- * Ligne de liste glissable vers la droite pour déclencher une action — chez nous « Lire ensuite »,
- * qui coûtait sinon appui long → feuille → action.
+ * Ligne de liste glissable vers la droite pour déclencher une action — chez nous « Lire ensuite ».
  *
- * `Animated` + `PanResponder` du cœur RN, comme tous les gestes du projet (mini-player, lecteur,
- * drawer, deck de tri) : react-native-gesture-handler n'est pas câblé et ses dépendances natives
- * pèsent lourd pour rien.
+ * La ligne suit le doigt et découvre un fond accent portant l'icône et le libellé de l'action.
+ * Passé le seuil, l'icône grossit et le téléphone donne un cran haptique : on sait qu'on peut
+ * lâcher sans lire. Au relâchement, la ligne revient sur un ressort, l'action étant déclenchée si
+ * le seuil était franchi.
  *
- * Deux contraintes tiennent tout le composant :
- *  - **le scroll vertical de la FlatList doit rester intouché** : le responder n'accepte le geste
- *    que s'il est franchement horizontal ET vers la droite (`dx > dy × 2`), sinon la liste garde
- *    la main. Le geste n'est jamais capté au `Start`, seulement au `Move`, donc le tap et l'appui
- *    long de la ligne fonctionnent normalement ;
- *  - **la hauteur doit rester exactement `TRACK_ROW_HEIGHT`**, contrat du `getItemLayout` des
- *    listes virtualisées.
+ * Deux contraintes tiennent le composant :
+ *  - **le défilement vertical de la liste reste prioritaire** : le geste ne s'active que sur un
+ *    mouvement franchement horizontal vers la droite, et abandonne dès que le doigt part en
+ *    vertical. Le tap et l'appui long de la ligne ne sont pas concernés ;
+ *  - **la hauteur reste exactement `TRACK_ROW_HEIGHT`**, contrat du `getItemLayout` des listes
+ *    virtualisées.
  */
 
 /** Distance à franchir pour valider. En deçà, la ligne revient sans rien déclencher. */
-const TRIGGER_DISTANCE = 96;
+const TRIGGER_DISTANCE = 88;
 /** Résistance appliquée au-delà du seuil : inutile de traîner la ligne à l'infini. */
-const OVERSHOOT_RATIO = 0.3;
-/** Mouvement minimal avant de prendre la main sur la liste. */
-const CAPTURE_SLOP = 12;
+const OVERSHOOT_RATIO = 0.25;
 
 export type SwipeableRowProps = {
   children: ReactNode;
@@ -36,7 +44,7 @@ export type SwipeableRowProps = {
   /** Libellé et icône révélés sous la ligne pendant le glissement. */
   label: string;
   icon: IconName;
-  /** Faux pour neutraliser le geste (mode sélection, liste réordonnable). */
+  /** Faux pour neutraliser le geste (mode sélection). */
   enabled?: boolean;
 };
 
@@ -47,83 +55,64 @@ export function SwipeableRow({
   icon,
   enabled = true,
 }: SwipeableRowProps) {
-  const [translateX] = useState(() => new Animated.Value(0));
+  const translateX = useSharedValue(0);
+  // Vrai tant que le doigt est au-delà du seuil : sert au cran haptique (une fois par passage).
+  const armed = useSharedValue(false);
 
-  // L'action change à chaque rendu du parent (closure sur la piste) mais le responder, lui, ne
-  // doit être créé qu'une fois : on la lit via une ref pour ne jamais capturer une closure périmée.
-  // Mise à jour en effet sans dépendances (motif du MiniPlayer) : écrire une ref pendant le rendu
-  // est interdit par `react-hooks/refs`.
-  const latestRef = useRef({ onSwipe, enabled });
-  useEffect(() => {
-    latestRef.current = { onSwipe, enabled };
-  });
+  const pan = Gesture.Pan()
+    .enabled(enabled)
+    .activeOffsetX(14)
+    .failOffsetX(-14)
+    .failOffsetY([-10, 10])
+    .onChange((e) => {
+      const dx = Math.max(0, e.translationX);
+      translateX.set(
+        dx > TRIGGER_DISTANCE ? TRIGGER_DISTANCE + (dx - TRIGGER_DISTANCE) * OVERSHOOT_RATIO : dx
+      );
+      const past = dx >= TRIGGER_DISTANCE;
+      if (past !== armed.get()) {
+        armed.set(past);
+        if (past) {
+          scheduleOnRN(hapticSelection);
+        }
+      }
+    })
+    .onEnd(() => {
+      if (armed.get()) {
+        scheduleOnRN(onSwipe);
+      }
+    })
+    .onFinalize(() => {
+      armed.set(false);
+      translateX.set(withSpring(0, SPRING_SNAPPY));
+    });
 
-  const springBack = () => {
-    Animated.spring(translateX, {
-      toValue: 0,
-      useNativeDriver: true,
-      speed: 20,
-      bounciness: 6,
-    }).start();
-  };
-
-  /* eslint-disable react-hooks/refs */
-  const responder = useMemo(
-    () =>
-      PanResponder.create({
-        // Jamais au Start : le tap et l'appui long de la ligne doivent passer.
-        onMoveShouldSetPanResponder: (_e, g) =>
-          latestRef.current.enabled && g.dx > CAPTURE_SLOP && g.dx > Math.abs(g.dy) * 2,
-        onPanResponderMove: (_e, g) => {
-          // Vers la gauche : rien (une seule action, à droite). Résistance passé le seuil.
-          const dx = Math.max(0, g.dx);
-          translateX.setValue(
-            dx > TRIGGER_DISTANCE
-              ? TRIGGER_DISTANCE + (dx - TRIGGER_DISTANCE) * OVERSHOOT_RATIO
-              : dx
-          );
-        },
-        onPanResponderRelease: (_e, g) => {
-          if (g.dx >= TRIGGER_DISTANCE) {
-            latestRef.current.onSwipe();
-          }
-          springBack();
-        },
-        onPanResponderTerminate: springBack,
-      }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [translateX]
-  );
-  /* eslint-enable react-hooks/refs */
+  const rowStyle = useAnimatedStyle(() => ({ transform: [{ translateX: translateX.get() }] }));
+  const actionStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(
+      translateX.get(),
+      [0, TRIGGER_DISTANCE * 0.4, TRIGGER_DISTANCE],
+      [0, 0.55, 1],
+      Extrapolation.CLAMP
+    ),
+  }));
+  const iconStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: withSpring(armed.get() ? 1.25 : 1, SPRING_SNAPPY) }],
+  }));
 
   return (
     <View style={styles.container}>
-      {/* Fond révélé : n'apparaît qu'une fois le geste engagé, et se colore à pleine intensité
-          quand le seuil est franchi — le pouce sait qu'il peut lâcher sans regarder le libellé. */}
-      <Animated.View
-        style={[
-          styles.action,
-          {
-            opacity: translateX.interpolate({
-              inputRange: [0, TRIGGER_DISTANCE / 2, TRIGGER_DISTANCE],
-              outputRange: [0, 0.6, 1],
-              extrapolate: 'clamp',
-            }),
-          },
-        ]}
-        pointerEvents="none"
-      >
-        <Icon name={icon} size={20} color={colors.onAccent} />
+      <Animated.View style={[styles.action, actionStyle]} pointerEvents="none">
+        <Animated.View style={iconStyle}>
+          <Icon name={icon} size={20} color={colors.onAccent} />
+        </Animated.View>
         <Text style={styles.actionLabel} numberOfLines={1}>
           {label}
         </Text>
       </Animated.View>
-      <Animated.View
-        {...responder.panHandlers}
-        style={[styles.row, { transform: [{ translateX }] }]}
-      >
-        {children}
-      </Animated.View>
+      <GestureDetector gesture={pan}>
+        <Animated.View style={[styles.row, rowStyle]}>{children}</Animated.View>
+      </GestureDetector>
     </View>
   );
 }
@@ -149,7 +138,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: colors.onAccent,
   },
-  // Fond opaque obligatoire : sans lui, le fond d'action resterait visible sous la ligne.
+  // Fond opaque : la couche mobile doit masquer le fond accent tant qu'elle est en place.
   row: {
     height: TRACK_ROW_HEIGHT,
     backgroundColor: colors.background,
