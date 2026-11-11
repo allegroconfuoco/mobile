@@ -7,6 +7,35 @@ et ce projet suit le [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-11-11
+
+Retour aux basiques : l'application se concentre sur l'écoute, les playlists et les statistiques, et devient plus rapide.
+
+### Added
+
+- Barre d'onglets en bas de l'écran : Morceaux, Playlists, Artistes (avec un sélecteur Artistes / Albums) et Écoutes. Elle reste visible sur tous les écrans, et toucher à nouveau l'onglet actif remonte la liste en haut.
+- Recherche globale, accessible par la loupe de chaque onglet : un seul champ cherche à la fois dans les titres, les artistes, les albums et les playlists, sans tenir compte des accents.
+- Le bouton « + » de chaque morceau ouvre directement « Ajouter à » : Nouvelle playlist, Favoris, puis les playlists, celles qui contiennent déjà le titre étant cochées. Le même bouton existe sur le mini-lecteur et l'écran de lecture.
+- Dans l'écran de lecture, toucher le titre propose d'aller à l'album, à l'artiste ou à la playlist d'où vient la lecture.
+- Playlist automatique « Récemment ajoutés », à côté des Favoris.
+- Boutons « Lire » et « Aléatoire » en tête des pages artiste, album et playlist, et bouton « Aléatoire » sur toute la bibliothèque.
+- Au lancement, le mini-lecteur affiche la dernière écoute à l'endroit où elle s'était arrêtée : un appui sur lecture la reprend.
+
+### Changed
+
+- Le lancement d'un morceau est instantané : l'application ne relit plus le chemin de chaque fichier de la file avant de jouer.
+- Démarrage et défilement plus légers : les regroupements par artiste et par album ne sont calculés qu'à l'ouverture de l'onglet Artistes, et les tris sont plus rapides.
+- Animations complètes : glisser le mini-lecteur fait défiler les morceaux comme des pages (le titre en cours sort entièrement, le suivant entre à sa place), l'écran de lecture se ferme en le tirant vers le bas, les feuilles d'actions se ferment en les tirant, et les boutons lecture, favori et onglets réagissent avec des transitions continues.
+- L'appui long sur un morceau ouvre directement la sélection multiple, dont les actions valent aussi pour un seul titre. En playlist et dans les Favoris, elle propose aussi de retirer les titres.
+- L'application affiche uniquement les informations présentes dans les fichiers (titre, artiste, album, pochette). Pour corriger un titre, on corrige le fichier sur ordinateur : la correction apparaît au scan suivant, y compris dans les statistiques et l'historique.
+
+### Removed
+
+- Identification et correction des métadonnées via MusicBrainz, réécriture des tags dans les fichiers et nettoyage des titres. Les corrections enregistrées dans l'application sont effacées à la mise à jour.
+- Menu latéral et page d'accueil à tuiles, remplacés par les onglets.
+- Playlists automatiques « En boucle » et « Top de l'année », badges, carte de partage des statistiques et écoute privée.
+- Permission d'accès à tous les fichiers, qui ne servait qu'à la réécriture des tags.
+
 ## [2.3.0] - 2026-08-13
 
 ### Added
